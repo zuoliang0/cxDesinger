@@ -1,0 +1,2114 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
+import {
+  ArrowLeft,
+  Archive,
+  Boxes,
+  Check,
+  Download,
+  Eye,
+  FileText,
+  FolderOpen,
+  Image,
+  Layers,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Scissors,
+  Send,
+  Settings,
+  Sparkles,
+  Square,
+  X
+} from "lucide-react";
+import type {
+  AiStreamEvent,
+  AppSettings,
+  AssetMeta,
+  CodexModel,
+  DocumentMeta,
+  PageImageAnnotation,
+  PageImageVersion,
+  ProjectIndexEntry,
+  ProjectInfo,
+  SelectionRect,
+  SliceSelectionMeta
+} from "../shared/types";
+import { formatDocumentComment } from "./comment-format";
+import { createDemoApi } from "./demo-api";
+import { MarkdownDocument } from "./MarkdownDocument";
+import { selectionToNatural } from "./selection";
+import { getCurrentTaskLabel } from "./task-status";
+
+type Screen = "home" | "planning" | "pages";
+type ActiveCodexTask = {
+  id: string;
+  label: string;
+  startedAt: number;
+  scope: AiStreamEvent["scope"];
+};
+type PageAssetPreview =
+  | { kind: "slice"; assetId: string; dataUrl: string }
+  | { kind: "background"; path: string; dataUrl: string };
+
+const api = window.aiProductDesigner ?? createDemoApi();
+
+export function App() {
+  const [projects, setProjects] = useState<ProjectIndexEntry[]>([]);
+  const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [screen, setScreen] = useState<Screen>("home");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [busyText, setBusyText] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [imageTask, setImageTask] = useState<ActiveCodexTask | null>(null);
+  const [imageStreamEvents, setImageStreamEvents] = useState<AiStreamEvent[]>([]);
+  const imageTaskIdRef = useRef("");
+
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    refreshProjects().catch((err) => setError(toErrorMessage(err)));
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = api.onAiStreamEvent((event) => {
+      if (event.taskId !== imageTaskIdRef.current || event.scope !== "image") {
+        return;
+      }
+
+      setImageStreamEvents((current) => [...current, event].slice(-120));
+    });
+
+    return unsubscribe;
+  }, []);
+
+  function startImageTask(id: string, label: string) {
+    imageTaskIdRef.current = id;
+    setImageStreamEvents([]);
+    setImageTask({ id, label, scope: "image", startedAt: Date.now() });
+  }
+
+  function finishImageTask(id: string) {
+    setImageTask((current) => {
+      if (current?.id !== id) {
+        return current;
+      }
+
+      setImageStreamEvents((events) => [
+        ...events,
+        {
+          taskId: id,
+          scope: "image",
+          level: "complete",
+          message: `任务结束，耗时 ${formatElapsed(Date.now() - current.startedAt)}`,
+          createdAt: new Date().toISOString()
+        }
+      ]);
+      return null;
+    });
+    if (imageTaskIdRef.current === id) {
+      imageTaskIdRef.current = "";
+    }
+  }
+
+  async function cancelActiveImageTask() {
+    if (!imageTask) {
+      return;
+    }
+
+    await api.cancelTask(imageTask.id);
+    setImageStreamEvents((current) => [
+      ...current,
+      {
+        taskId: imageTask.id,
+        scope: "image",
+        level: "error",
+        message: "已请求停止当前 Codex 调用",
+        createdAt: new Date().toISOString()
+      }
+    ]);
+  }
+
+  async function refreshProjects() {
+    setProjects(await api.listProjects());
+  }
+
+  async function openProject(rootDir: string) {
+    setBusyText("正在打开项目");
+    setError("");
+
+    try {
+      const opened = await api.openProject(rootDir);
+      setProject(opened);
+      setScreen("planning");
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setBusyText("");
+    }
+  }
+
+  async function exportProject() {
+    if (!project) {
+      return;
+    }
+
+    setBusyText("正在导出项目");
+    setError("");
+    setNotice("");
+
+    try {
+      const result = await api.exportProjectZip({ projectRoot: project.rootDir });
+      setNotice(`已导出：${result.zipPath}`);
+    } catch (err) {
+      setError(toErrorMessage(err));
+    } finally {
+      setBusyText("");
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand">
+          <Boxes size={20} />
+          <span>AI Product Designer</span>
+        </div>
+        {project ? (
+          <div className="project-context">
+            <strong>{project.meta.project.name}</strong>
+            <span>{project.rootDir}</span>
+          </div>
+        ) : null}
+        <div className="top-actions">
+          {project ? (
+            <>
+              <button
+                className={screen === "planning" ? "toolbar-button active" : "toolbar-button"}
+                onClick={() => setScreen("planning")}
+              >
+                <FileText size={16} />
+                产品规划
+              </button>
+              <button
+                className={screen === "pages" ? "toolbar-button active" : "toolbar-button"}
+                onClick={() => setScreen("pages")}
+              >
+                <Layers size={16} />
+                页面管理
+              </button>
+              <button className="icon-button" onClick={exportProject} title="导出项目">
+                <Download size={18} />
+              </button>
+              <button
+                className="icon-button"
+                onClick={() => {
+                  setProject(null);
+                  setScreen("home");
+                  refreshProjects().catch((err) => setError(toErrorMessage(err)));
+                }}
+                title="返回项目列表"
+              >
+                <Archive size={18} />
+              </button>
+            </>
+          ) : null}
+          <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置">
+            <Settings size={18} />
+          </button>
+        </div>
+      </header>
+
+      {error ? (
+        <div className="toast error">
+          <span>{error}</span>
+          <button onClick={() => setError("")} title="关闭">
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="toast notice">
+          <span>{notice}</span>
+          <button onClick={() => setNotice("")} title="关闭">
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
+      {busyText ? (
+        <div className="busy-overlay">
+          <Loader2 className="spin" size={22} />
+          <span>{busyText}</span>
+        </div>
+      ) : null}
+
+      <main className="workspace">
+        {screen === "home" ? (
+          <HomeView
+            projects={projects}
+            onNewProject={() => setNewProjectOpen(true)}
+            onOpenProject={openProject}
+          />
+        ) : null}
+        {screen === "planning" && project ? (
+          <PlanningView
+            project={project}
+            onProjectChange={setProject}
+            onError={setError}
+          />
+        ) : null}
+        {screen === "pages" && project ? (
+          <PagesView
+            project={project}
+            onProjectChange={setProject}
+            onError={setError}
+            onNotice={setNotice}
+            imageTask={imageTask}
+            imageStreamEvents={imageStreamEvents}
+            onImageTaskStart={startImageTask}
+            onImageTaskFinish={finishImageTask}
+            onCancelImageTask={cancelActiveImageTask}
+          />
+        ) : null}
+      </main>
+
+      {newProjectOpen ? (
+        <NewProjectDialog
+          onClose={() => setNewProjectOpen(false)}
+          onCreated={(created) => {
+            setProject(created);
+            setScreen("planning");
+            setNewProjectOpen(false);
+            refreshProjects().catch((err) => setError(toErrorMessage(err)));
+          }}
+          onBusy={setBusyText}
+          onError={setError}
+        />
+      ) : null}
+
+      {settingsOpen ? (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onError={setError}
+          onNotice={setNotice}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function HomeView({
+  projects,
+  onNewProject,
+  onOpenProject
+}: {
+  projects: ProjectIndexEntry[];
+  onNewProject: () => void;
+  onOpenProject: (rootDir: string) => void;
+}) {
+  return (
+    <section className="home-layout">
+      <div className="section-header">
+        <div>
+          <h1>项目</h1>
+          <span>{projects.length} 个项目</span>
+        </div>
+        <button className="primary-button" onClick={onNewProject}>
+          <Plus size={18} />
+          新建项目
+        </button>
+      </div>
+
+      <div className="project-list">
+        {projects.length === 0 ? (
+          <div className="empty-state">暂无项目</div>
+        ) : (
+          projects.map((item) => (
+            <button className="project-row" key={item.id} onClick={() => onOpenProject(item.rootDir)}>
+              <div>
+                <strong>{item.name}</strong>
+                <span>{item.rootDir}</span>
+              </div>
+              <time>{formatDate(item.updatedAt)}</time>
+            </button>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function NewProjectDialog({
+  onClose,
+  onCreated,
+  onBusy,
+  onError
+}: {
+  onClose: () => void;
+  onCreated: (project: ProjectInfo) => void;
+  onBusy: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [rootDir, setRootDir] = useState("");
+
+  async function chooseDirectory() {
+    const selected = await api.selectProjectDirectory();
+    if (selected) {
+      setRootDir(selected);
+    }
+  }
+
+  async function createProject() {
+    onBusy("正在创建项目");
+    onError("");
+
+    try {
+      const created = await api.createProject({ name, rootDir });
+      onCreated(created);
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      onBusy("");
+    }
+  }
+
+  return (
+    <Dialog title="新建项目" onClose={onClose}>
+      <label className="field">
+        <span>项目名称</span>
+        <input value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+      </label>
+      <label className="field">
+        <span>项目根目录</span>
+        <div className="inline-field">
+          <input value={rootDir} onChange={(event) => setRootDir(event.target.value)} />
+          <button className="icon-button" onClick={chooseDirectory} title="选择目录">
+            <FolderOpen size={18} />
+          </button>
+        </div>
+      </label>
+      <div className="dialog-actions">
+        <button className="secondary-button" onClick={onClose}>
+          取消
+        </button>
+        <button className="primary-button" onClick={createProject}>
+          <Check size={16} />
+          确定
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+function PlanningView({
+  project,
+  onProjectChange,
+  onError
+}: {
+  project: ProjectInfo;
+  onProjectChange: (project: ProjectInfo) => void;
+  onError: (message: string) => void;
+}) {
+  const [requirement, setRequirement] = useState("");
+  const [selectedModel, setSelectedModel] = useState<CodexModel>("gpt-5.5");
+  const [selectedDoc, setSelectedDoc] = useState<DocumentMeta | null>(project.meta.documents[0] || null);
+  const [docContent, setDocContent] = useState("");
+  const [activeTask, setActiveTask] = useState<{
+    id: string;
+    label: string;
+    scope: "planning" | "document" | "page-plan";
+    startedAt: number;
+  } | null>(null);
+  const [streamEvents, setStreamEvents] = useState<AiStreamEvent[]>([]);
+  const activeTaskIdRef = useRef("");
+  const streamEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setSelectedDoc((current) => {
+      if (current) {
+        const stillExists = project.meta.documents.find((doc) => doc.path === current.path);
+
+        if (stillExists) {
+          return stillExists;
+        }
+      }
+
+      return project.meta.documents[0] || null;
+    });
+  }, [project.meta.documents]);
+
+  useEffect(() => {
+    const unsubscribe = api.onAiStreamEvent((event) => {
+      if (event.taskId !== activeTaskIdRef.current) {
+        return;
+      }
+
+      setStreamEvents((current) => [...current, event].slice(-80));
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    streamEndRef.current?.scrollIntoView({ block: "end" });
+  }, [streamEvents]);
+
+  useEffect(() => {
+    if (!selectedDoc) {
+      setDocContent("");
+      return;
+    }
+
+    api
+      .readDocument({ projectRoot: project.rootDir, relativePath: selectedDoc.path })
+      .then(setDocContent)
+      .catch(() => setDocContent(""));
+  }, [project.rootDir, selectedDoc]);
+
+  async function sendRequirement() {
+    const instruction = requirement.trim();
+
+    if (!instruction || activeTask) {
+      return;
+    }
+
+    const taskId = createTaskId();
+    const hasSelectedDocument = Boolean(selectedDoc);
+    const nextTask = hasSelectedDocument
+      ? {
+          id: taskId,
+          label: `修改当前文档：${selectedDoc?.path}`,
+          scope: "document" as const,
+          startedAt: Date.now()
+        }
+      : {
+          id: taskId,
+          label: getCurrentTaskLabel(instruction),
+          scope: "planning" as const,
+          startedAt: Date.now()
+        };
+
+    activeTaskIdRef.current = taskId;
+    setStreamEvents([]);
+    setActiveTask(nextTask);
+    setRequirement("");
+    onError("");
+
+    try {
+      if (hasSelectedDocument && selectedDoc) {
+        const result = await api.reviseDocument({
+          taskId,
+          projectRoot: project.rootDir,
+          documentPath: selectedDoc.path,
+          instruction,
+          model: selectedModel,
+          reasoningEffort: "high"
+        });
+
+        setDocContent(result.content);
+        onProjectChange(result.project);
+      } else {
+        const updated = await api.runPlanning({
+          taskId,
+          projectRoot: project.rootDir,
+          requirement: instruction,
+          model: selectedModel,
+          reasoningEffort: "high"
+        });
+        onProjectChange(updated);
+      }
+    } catch (err) {
+      onError(toErrorMessage(err));
+      setRequirement((current) => current || instruction);
+    } finally {
+      finishActiveTask(taskId);
+    }
+  }
+
+  async function syncPagePlan() {
+    if (!selectedDoc || selectedDoc.type !== "page-plan" || activeTask) {
+      return;
+    }
+
+    const taskId = createTaskId();
+
+    activeTaskIdRef.current = taskId;
+    setStreamEvents([]);
+    setActiveTask({
+      id: taskId,
+      label: "同步页面规划到 pages.json",
+      scope: "page-plan",
+      startedAt: Date.now()
+    });
+    onError("");
+
+    try {
+      const updated = await api.syncPagePlan({
+        taskId,
+        projectRoot: project.rootDir,
+        pagePlanPath: selectedDoc.path,
+        model: selectedModel,
+        reasoningEffort: "high"
+      });
+
+      onProjectChange(updated);
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      finishActiveTask(taskId);
+    }
+  }
+
+  function addDocumentComment(line: number, comment: string) {
+    if (!selectedDoc) {
+      return;
+    }
+
+    const nextComment = formatDocumentComment({
+      documentPath: selectedDoc.path,
+      line,
+      comment
+    });
+
+    setRequirement((current) => {
+      const prefix = current.trimEnd();
+      return prefix ? `${prefix}\n\n${nextComment}` : nextComment;
+    });
+  }
+
+  async function cancelActiveTask() {
+    if (!activeTask) {
+      return;
+    }
+
+    await api.cancelTask(activeTask.id);
+  }
+
+  function finishActiveTask(taskId: string) {
+    setActiveTask((current) => {
+      if (current?.id !== taskId) {
+        return current;
+      }
+
+      setStreamEvents((events) => [
+        ...events,
+        {
+          taskId,
+          scope: current.scope,
+          level: "complete",
+          message: `任务结束，耗时 ${formatElapsed(Date.now() - current.startedAt)}`,
+          createdAt: new Date().toISOString()
+        }
+      ]);
+      return null;
+    });
+
+    if (activeTaskIdRef.current === taskId) {
+      activeTaskIdRef.current = "";
+    }
+  }
+
+  return (
+    <div className="split-layout">
+      <aside className="sidebar">
+        <div className="panel-title">
+          <FileText size={16} />
+          <span>文档</span>
+        </div>
+        <div className="nav-list">
+          {project.meta.documents.length === 0 ? (
+            <div className="empty-state compact">暂无文档</div>
+          ) : (
+            project.meta.documents.map((doc) => (
+              <button
+                className={selectedDoc?.path === doc.path ? "nav-row active" : "nav-row"}
+                key={doc.path}
+                onClick={() => setSelectedDoc(doc)}
+              >
+                <span>{doc.title}</span>
+                <small>{doc.path}</small>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+      <section className="main-panel planning-panel">
+        <div className="document-preview">
+          {selectedDoc?.type === "page-plan" ? (
+            <div className="document-toolbar">
+              <button
+                className="toolbar-button sync-page-plan-button"
+                onClick={syncPagePlan}
+                disabled={Boolean(activeTask)}
+              >
+                <RefreshCw size={16} />
+                同步到 pages.json
+              </button>
+            </div>
+          ) : null}
+          {selectedDoc ? (
+            <MarkdownDocument
+              content={docContent}
+              documentPath={selectedDoc.path}
+              onAddComment={addDocumentComment}
+            />
+          ) : (
+            <div className="empty-state compact">暂无文档</div>
+          )}
+        </div>
+        <div className="planning-input-area">
+          {activeTask ? (
+            <TaskStatus task={activeTask} onCancel={cancelActiveTask} />
+          ) : null}
+          {streamEvents.length > 0 ? <AiStreamPanel events={streamEvents} endRef={streamEndRef} /> : null}
+          <div className="prompt-bar planning-prompt-bar">
+            <textarea
+              value={requirement}
+              onChange={(event) => setRequirement(event.target.value)}
+              placeholder={selectedDoc ? "描述对当前文档的修改意见" : "描述要创建的产品和规划任务"}
+            />
+            <label className="model-picker">
+              <span>模型</span>
+              <select
+                value={selectedModel}
+                onChange={(event) => setSelectedModel(event.target.value as CodexModel)}
+                disabled={Boolean(activeTask)}
+                aria-label="选择模型"
+              >
+                <option value="gpt-5.5">GPT-5.5</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+              </select>
+              <small>高思考</small>
+            </label>
+            <button
+              className="primary-button send-button"
+              onClick={sendRequirement}
+              disabled={Boolean(activeTask) || !requirement.trim()}
+            >
+              <Send size={18} />
+              {activeTask ? "处理中" : "发送"}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TaskStatus({
+  task,
+  onCancel
+}: {
+  task: { label: string; startedAt: number };
+  onCancel?: () => void;
+}) {
+  const elapsedMs = useElapsedMs(task.startedAt);
+
+  return (
+    <div className="task-status" role="status">
+      <Loader2 className="spin" size={16} />
+      <span>{task.label}</span>
+      <time>{formatElapsed(elapsedMs)}</time>
+      {onCancel ? (
+        <button className="danger-button compact" onClick={onCancel} type="button">
+          <Square size={13} />
+          停止
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function AiStreamPanel({
+  events,
+  endRef,
+  compact = false
+}: {
+  events: AiStreamEvent[];
+  endRef: RefObject<HTMLDivElement>;
+  compact?: boolean;
+}) {
+  return (
+    <div className={compact ? "ai-stream-panel compact" : "ai-stream-panel"} role="log" aria-live="polite">
+      {events.map((event, index) => (
+        <div className={`ai-stream-line ${event.level}`} key={`${event.createdAt}-${index}`}>
+          <span className="ai-stream-level">{formatStreamLevel(event.level)}</span>
+          <span>{event.message}</span>
+        </div>
+      ))}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
+function useElapsedMs(startedAt: number): number {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return Math.max(0, now - startedAt);
+}
+
+function PagesView({
+  project,
+  onProjectChange,
+  onError,
+  onNotice,
+  imageTask: activeImageTask,
+  imageStreamEvents,
+  onImageTaskStart,
+  onImageTaskFinish,
+  onCancelImageTask
+}: {
+  project: ProjectInfo;
+  onProjectChange: (project: ProjectInfo) => void;
+  onError: (message: string) => void;
+  onNotice: (message: string) => void;
+  imageTask: ActiveCodexTask | null;
+  imageStreamEvents: AiStreamEvent[];
+  onImageTaskStart: (id: string, label: string) => void;
+  onImageTaskFinish: (id: string) => void;
+  onCancelImageTask: () => void;
+}) {
+  const [selectedPageId, setSelectedPageId] = useState(project.meta.pages[0]?.id || "");
+  const selectedPage = useMemo(
+    () => project.meta.pages.find((page) => page.id === selectedPageId) || project.meta.pages[0],
+    [project.meta.pages, selectedPageId]
+  );
+  const [prompt, setPrompt] = useState(selectedPage?.uiPrompt || "");
+  const [imageData, setImageData] = useState("");
+  const [assetPreview, setAssetPreview] = useState<PageAssetPreview | null>(null);
+  const [imageVersions, setImageVersions] = useState<PageImageVersion[]>([]);
+  const [sliceSelections, setSliceSelections] = useState<SliceSelectionMeta[]>([]);
+  const [selectedSelectionId, setSelectedSelectionId] = useState("");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [annotationMode, setAnnotationMode] = useState(false);
+  const [pageAnnotations, setPageAnnotations] = useState<PageImageAnnotation[]>([]);
+  const [annotationPopover, setAnnotationPopover] = useState<{
+    displaySelection: SelectionRect;
+    annotation: PageImageAnnotation;
+    note: string;
+  } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: "slice" | "annotation";
+    id: string;
+    label: string;
+  } | null>(null);
+  const [singleSliceNote, setSingleSliceNote] = useState("");
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragSelection, setDragSelection] = useState<SelectionRect | null>(null);
+  const [imageRenderInfo, setImageRenderInfo] = useState<{
+    width: number;
+    height: number;
+    naturalWidth: number;
+    naturalHeight: number;
+  } | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const imageStreamEndRef = useRef<HTMLDivElement | null>(null);
+  const selectedSliceItemRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    imageStreamEndRef.current?.scrollIntoView({ block: "end" });
+  }, [imageStreamEvents]);
+
+  useEffect(() => {
+    selectedSliceItemRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "center",
+      behavior: "smooth"
+    });
+  }, [selectedSelectionId]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const close = () => {
+      setContextMenu(null);
+      setSingleSliceNote("");
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!selectedPage && project.meta.pages[0]) {
+      setSelectedPageId(project.meta.pages[0].id);
+    }
+  }, [project.meta.pages, selectedPage]);
+
+  useEffect(() => {
+    setPrompt(selectedPage?.uiPrompt || "");
+    setDragSelection(null);
+    setDragStart(null);
+    setSelectionMode(false);
+    setAnnotationMode(false);
+    setAnnotationPopover(null);
+    setPageAnnotations([]);
+    setAssetPreview(null);
+  }, [selectedPage?.id, selectedPage?.uiPrompt]);
+
+  useEffect(() => {
+    const selections = (project.meta.sliceSelections || []).filter(
+      (selection) => selection.pageId === selectedPage?.id
+    );
+
+    setSliceSelections(selections);
+    setSelectedSelectionId((current) =>
+      current && selections.some((selection) => selection.id === current) ? current : selections[0]?.id || ""
+    );
+  }, [project.meta.sliceSelections, selectedPage?.id]);
+
+  useEffect(() => {
+    if (!selectedPage?.imagePath) {
+      setImageData("");
+      return;
+    }
+
+    api
+      .readAssetAsDataUrl({
+        projectRoot: project.rootDir,
+        relativePath: selectedPage.imagePath
+      })
+      .then(setImageData)
+      .catch((err) => onError(toErrorMessage(err)));
+  }, [project.rootDir, selectedPage?.imagePath, onError]);
+
+  useEffect(() => {
+    window.addEventListener("resize", updateImageRenderInfo);
+    return () => window.removeEventListener("resize", updateImageRenderInfo);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPage) {
+      setImageVersions([]);
+      return;
+    }
+
+    api
+      .listPageImageVersions({ projectRoot: project.rootDir, pageId: selectedPage.id })
+      .then(setImageVersions)
+      .catch(() => setImageVersions([]));
+  }, [project.rootDir, selectedPage?.id, selectedPage?.imagePath, project.meta.project.updatedAt]);
+
+  async function generatePageImage() {
+    if (!selectedPage || activeImageTask) {
+      return;
+    }
+
+    const taskId = createTaskId();
+
+    onImageTaskStart(taskId, "正在生成当前页面图片");
+    setAssetPreview(null);
+    onError("");
+
+    try {
+      const updated = await api.generatePageImage({
+        taskId,
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        prompt,
+        annotations: pageAnnotations,
+        model: "gpt-5.5",
+        reasoningEffort: "high"
+      });
+      onProjectChange(updated);
+      setPageAnnotations([]);
+      setAnnotationPopover(null);
+      setAnnotationMode(false);
+      onNotice("界面图片已生成");
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      onImageTaskFinish(taskId);
+    }
+  }
+
+  async function generatePageBackground() {
+    if (!selectedPage?.imagePath || activeImageTask) {
+      return;
+    }
+
+    const taskId = createTaskId();
+
+    setAssetPreview(null);
+    onImageTaskStart(taskId, "正在提取页面背景");
+    onError("");
+
+    try {
+      const updated = await api.generatePageBackground({
+        taskId,
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        model: "gpt-5.5",
+        reasoningEffort: "high"
+      });
+      onProjectChange(updated);
+      onNotice("页面背景已提取并写入 pages.json");
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      onImageTaskFinish(taskId);
+    }
+  }
+
+  async function generateSlice() {
+    if (!selectedPage?.imagePath || activeImageTask) {
+      return;
+    }
+
+    const pendingSelectionIds = sliceSelections
+      .filter((selection) => selection.status !== "generated")
+      .map((selection) => selection.id);
+
+    if (pendingSelectionIds.length === 0) {
+      return;
+    }
+
+    const taskId = createTaskId();
+
+    onImageTaskStart(taskId, "正在生成切图素材");
+    setAssetPreview(null);
+    onError("");
+
+    try {
+      const batchUpdated = await api.generateSliceAssets({
+        taskId,
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        selectionIds: pendingSelectionIds,
+        model: "gpt-5.5",
+        reasoningEffort: "high"
+      });
+      onProjectChange(batchUpdated);
+      setDragSelection(null);
+      setSelectionMode(false);
+      onNotice("切图生成已完成");
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      onImageTaskFinish(taskId);
+    }
+  }
+
+  async function identifySliceSelections() {
+    if (!selectedPage?.imagePath || activeImageTask) {
+      return;
+    }
+
+    const taskId = createTaskId();
+
+    setAssetPreview(null);
+    setSelectionMode(false);
+    setAnnotationMode(false);
+    setAnnotationPopover(null);
+    onImageTaskStart(taskId, "正在识别切图区域");
+    onError("");
+
+    try {
+      const updated = await api.identifySliceSelections({
+        taskId,
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        model: "gpt-5.5",
+        reasoningEffort: "high"
+      });
+      onProjectChange(updated);
+      onNotice("切图区域已识别，可确认后生成全部切图");
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      onImageTaskFinish(taskId);
+    }
+  }
+
+  async function generateSingleSlice(selectionId: string, note: string) {
+    if (!selectedPage?.imagePath || activeImageTask) {
+      return;
+    }
+
+    const taskId = createTaskId();
+
+    onImageTaskStart(taskId, "正在单独生成切图素材");
+    setAssetPreview(null);
+    onError("");
+
+    try {
+      const updated = await api.generateSliceAssets({
+        taskId,
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        selectionIds: [selectionId],
+        prompt: note,
+        force: true,
+        replaceExisting: true,
+        model: "gpt-5.5",
+        reasoningEffort: "high"
+      });
+      onProjectChange(updated);
+      setSelectedSelectionId(selectionId);
+      setContextMenu(null);
+      setSingleSliceNote("");
+      onNotice("单独切图已完成");
+    } catch (err) {
+      onError(toErrorMessage(err));
+    } finally {
+      onImageTaskFinish(taskId);
+    }
+  }
+
+  async function saveSelections(nextSelections: SliceSelectionMeta[]) {
+    if (!selectedPage) {
+      return;
+    }
+
+    setSliceSelections(nextSelections);
+
+    try {
+      const updated = await api.saveSliceSelections({
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        selections: nextSelections
+      });
+      onProjectChange(updated);
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  async function createSliceSelection(selection: SelectionRect) {
+    if (!selectedPage?.imagePath || !imageRef.current) {
+      return;
+    }
+
+    const rect = imageRef.current.getBoundingClientRect();
+    const naturalSelection = toNaturalSelection(selection, rect, imageRef.current);
+
+    if (naturalSelection.width < 8 || naturalSelection.height < 8) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const nextIndex = sliceSelections.length + 1;
+    const nextSelection: SliceSelectionMeta = {
+      id: createClientId("selection"),
+      pageId: selectedPage.id,
+      name: `${selectedPage.name} 素材 ${nextIndex}`,
+      sourceImagePath: selectedPage.imagePath,
+      selection: naturalSelection,
+      prompt: "",
+      status: "pending",
+      assetId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    const nextSelections = [...sliceSelections, nextSelection];
+
+    setSelectedSelectionId(nextSelection.id);
+    await saveSelections(nextSelections);
+  }
+
+  function startAnnotationMode() {
+    if (!selectedPage?.imagePath || activeImageTask) {
+      return;
+    }
+
+    setAssetPreview(null);
+    setPrompt("");
+    setSelectionMode(false);
+    setAnnotationMode((value) => !value);
+    setAnnotationPopover(null);
+    setDragSelection(null);
+    setDragStart(null);
+  }
+
+  function createAnnotation(displaySelection: SelectionRect) {
+    if (!selectedPage?.imagePath || !imageRef.current) {
+      return;
+    }
+
+    const rect = imageRef.current.getBoundingClientRect();
+    const naturalSelection = toNaturalSelection(displaySelection, rect, imageRef.current);
+
+    if (naturalSelection.width < 8 || naturalSelection.height < 8) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const annotation: PageImageAnnotation = {
+      id: createClientId("annotation"),
+      pageId: selectedPage.id,
+      sourceImagePath: selectedPage.imagePath,
+      selection: naturalSelection,
+      note: "",
+      createdAt: timestamp
+    };
+
+    setAnnotationPopover({
+      displaySelection,
+      annotation,
+      note: ""
+    });
+  }
+
+  function submitAnnotation() {
+    if (!annotationPopover || !annotationPopover.note.trim()) {
+      return;
+    }
+
+    const annotation = {
+      ...annotationPopover.annotation,
+      note: annotationPopover.note.trim()
+    };
+    const annotationText = formatImageAnnotationPrompt(annotation);
+
+    setPageAnnotations((current) => [...current, annotation]);
+    setPrompt((current) => {
+      const prefix = current.trimEnd();
+      return prefix ? `${prefix}\n\n${annotationText}` : annotationText;
+    });
+    setAnnotationPopover(null);
+  }
+
+  function updateSelectionDraft(event: PointerEvent<HTMLDivElement>, done = false) {
+    if ((!selectionMode && !annotationMode) || !imageRef.current || !selectedPage?.imagePath) {
+      return;
+    }
+
+    const rect = imageRef.current.getBoundingClientRect();
+    const point = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
+
+    if (!dragStart) {
+      setDragStart(point);
+      setDragSelection({ x: point.x, y: point.y, width: 1, height: 1 });
+      return;
+    }
+
+    const nextSelection = normalizeRect(dragStart, point);
+    setDragSelection(nextSelection);
+
+    if (done) {
+      setDragStart(null);
+      setDragSelection(null);
+
+      if (annotationMode) {
+        createAnnotation(nextSelection);
+      } else {
+        createSliceSelection(nextSelection).catch((err) => onError(toErrorMessage(err)));
+      }
+    }
+  }
+
+  const pageAssets = selectedPage
+    ? project.meta.assets.filter((asset) => asset.pageId === selectedPage.id)
+    : [];
+  const pendingSliceSelections = sliceSelections.filter((selection) => selection.status !== "generated");
+  const activeVersion = imageVersions.find((version) => version.active);
+  const selectedSliceSelection = sliceSelections.find((selection) => selection.id === selectedSelectionId);
+  const selectedPreviewAsset = assetPreview?.kind === "slice"
+    ? pageAssets.find((asset) => asset.id === assetPreview.assetId)
+    : null;
+  const previewTitle = assetPreview?.kind === "background"
+    ? "页面背景"
+    : selectedPreviewAsset?.name || "切图素材";
+  const previewPath = assetPreview?.kind === "background"
+    ? assetPreview.path
+    : selectedPreviewAsset?.path || "";
+
+  function updateImageRenderInfo() {
+    if (!imageRef.current) {
+      setImageRenderInfo(null);
+      return;
+    }
+
+    setImageRenderInfo({
+      width: imageRef.current.clientWidth,
+      height: imageRef.current.clientHeight,
+      naturalWidth: imageRef.current.naturalWidth,
+      naturalHeight: imageRef.current.naturalHeight
+    });
+  }
+
+  async function updateSliceSelection(
+    selectionId: string,
+    patch: Partial<Pick<SliceSelectionMeta, "name" | "prompt">>
+  ) {
+    const timestamp = new Date().toISOString();
+    const nextSelections = sliceSelections.map((selection) =>
+      selection.id === selectionId
+        ? {
+            ...selection,
+            ...patch,
+            status: selection.status === "generated" ? selection.status : ("pending" as const),
+            updatedAt: timestamp
+          }
+        : selection
+    );
+
+    await saveSelections(nextSelections);
+  }
+
+  async function previewSliceAsset(asset: AssetMeta) {
+    setSelectionMode(false);
+    setAnnotationMode(false);
+    setAnnotationPopover(null);
+    setDragStart(null);
+    setDragSelection(null);
+    setImageRenderInfo(null);
+    onError("");
+
+    try {
+      const dataUrl = await api.readAssetAsDataUrl({
+        projectRoot: project.rootDir,
+        relativePath: asset.path
+      });
+      setAssetPreview({ kind: "slice", assetId: asset.id, dataUrl });
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  async function previewPageBackground() {
+    if (!selectedPage?.backgroundImagePath) {
+      return;
+    }
+
+    setSelectionMode(false);
+    setAnnotationMode(false);
+    setAnnotationPopover(null);
+    setDragStart(null);
+    setDragSelection(null);
+    setImageRenderInfo(null);
+    onError("");
+
+    try {
+      const dataUrl = await api.readAssetAsDataUrl({
+        projectRoot: project.rootDir,
+        relativePath: selectedPage.backgroundImagePath
+      });
+      setAssetPreview({
+        kind: "background",
+        path: selectedPage.backgroundImagePath,
+        dataUrl
+      });
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  function returnToSliceCanvas() {
+    setAssetPreview(null);
+    window.setTimeout(updateImageRenderInfo, 0);
+  }
+
+  async function deleteSliceSelection(selectionId: string) {
+    const nextSelections = sliceSelections.filter((selection) => selection.id !== selectionId);
+    setSelectedSelectionId((current) => (current === selectionId ? nextSelections[0]?.id || "" : current));
+    await saveSelections(nextSelections);
+  }
+
+  function deleteAnnotation(annotationId: string) {
+    setPageAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
+    setPrompt((current) => removeImageAnnotationPrompt(current, annotationId));
+    setAnnotationPopover((current) =>
+      current?.annotation.id === annotationId ? null : current
+    );
+  }
+
+  function openDeleteContextMenu(
+    event: MouseEvent<HTMLElement>,
+    target: { type: "slice" | "annotation"; id: string; label: string }
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      ...target
+    });
+    setSingleSliceNote("");
+  }
+
+  function confirmContextDelete() {
+    if (!contextMenu) {
+      return;
+    }
+
+    if (contextMenu.type === "slice") {
+      deleteSliceSelection(contextMenu.id).catch((err) => onError(toErrorMessage(err)));
+    } else {
+      deleteAnnotation(contextMenu.id);
+    }
+
+    setContextMenu(null);
+    setSingleSliceNote("");
+  }
+
+  async function switchPageImageVersion(imagePath: string) {
+    if (!selectedPage || !imagePath || imagePath === selectedPage.imagePath) {
+      return;
+    }
+
+    setAssetPreview(null);
+
+    try {
+      const updated = await api.setActivePageImageVersion({
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        imagePath
+      });
+      onProjectChange(updated);
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  return (
+    <div className="split-layout">
+      <aside className="sidebar">
+        <div className="panel-title">
+          <Layers size={16} />
+          <span>页面</span>
+        </div>
+        <div className="nav-list">
+          {project.meta.pages.length === 0 ? (
+            <div className="empty-state compact">暂无页面</div>
+          ) : (
+            project.meta.pages.map((page) => (
+              <button
+                className={selectedPage?.id === page.id ? "nav-row active" : "nav-row"}
+                key={page.id}
+                onClick={() => setSelectedPageId(page.id)}
+              >
+                <span>{page.name}</span>
+                <small>{page.route}</small>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+      <section className="main-panel page-panel">
+        <div className="page-toolbar">
+          <div>
+            <h2>{selectedPage?.name || "页面"}</h2>
+            <span>{selectedPage?.route || ""}</span>
+          </div>
+          <div className="toolbar-group">
+            {selectedPage?.needUpdate ? (
+              <div className="page-update-hint">
+                <RefreshCw size={15} />
+                页面规划已更新，可以重新生成界面
+              </div>
+            ) : null}
+            <label className="version-picker">
+              <span>版本</span>
+              <select
+                value={activeVersion?.path || ""}
+                onChange={(event) => switchPageImageVersion(event.target.value)}
+                disabled={imageVersions.length === 0 || Boolean(activeImageTask)}
+                aria-label="选择页面图片版本"
+              >
+                {imageVersions.length === 0 ? (
+                  <option value="">暂无版本</option>
+                ) : (
+                  imageVersions.map((version) => (
+                    <option value={version.path} key={version.path}>
+                      {version.version}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <button
+              className={selectionMode ? "toolbar-button active" : "toolbar-button"}
+              onClick={() => {
+                setAssetPreview(null);
+                setSelectionMode((value) => !value);
+                setAnnotationMode(false);
+                setAnnotationPopover(null);
+              }}
+              disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
+            >
+              <Scissors size={16} />
+              切图
+            </button>
+            <button
+              className={annotationMode ? "toolbar-button active" : "toolbar-button"}
+              onClick={startAnnotationMode}
+              disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
+            >
+              <FileText size={16} />
+              批注
+            </button>
+            <button
+              className="toolbar-button"
+              onClick={generatePageBackground}
+              disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
+              title={selectedPage?.backgroundImagePath || "提取当前页面背景并写入 pages.json"}
+              type="button"
+            >
+              <Image size={16} />
+              {selectedPage?.backgroundImagePath ? "重提背景" : "提取背景"}
+            </button>
+            {selectedPage?.backgroundImagePath ? (
+              <button
+                className="toolbar-button"
+                onClick={previewPageBackground}
+                disabled={Boolean(activeImageTask)}
+                title={selectedPage.backgroundImagePath}
+                type="button"
+              >
+                <Eye size={16} />
+                查看背景
+              </button>
+            ) : null}
+            <button
+              className="toolbar-button"
+              onClick={identifySliceSelections}
+              disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
+              title="让 AI 自动识别当前界面中适合切图的组件区域"
+              type="button"
+            >
+              <Sparkles size={16} />
+              AI识别切图
+            </button>
+            <button
+              className="primary-button"
+              onClick={generateSlice}
+              disabled={
+                pendingSliceSelections.length === 0 ||
+                !selectedPage?.imagePath ||
+                Boolean(activeImageTask) ||
+                Boolean(assetPreview)
+              }
+            >
+              <Image size={16} />
+              生成全部切图
+            </button>
+          </div>
+        </div>
+
+        <div
+          className={[
+            "image-stage",
+            selectionMode || annotationMode ? "selecting" : "",
+            assetPreview ? "asset-preview-stage" : ""
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onPointerDown={(event) => {
+            if (!assetPreview) {
+              updateSelectionDraft(event);
+            }
+          }}
+          onPointerMove={(event) => {
+            if (!assetPreview && dragStart) {
+              updateSelectionDraft(event);
+            }
+          }}
+          onPointerUp={(event) => {
+            if (!assetPreview) {
+              updateSelectionDraft(event, true);
+            }
+          }}
+        >
+          {assetPreview ? (
+            <div className="asset-preview-view">
+              <div className="asset-preview-toolbar">
+	                <button className="secondary-button compact" onClick={returnToSliceCanvas} type="button">
+	                  <ArrowLeft size={15} />
+	                  返回页面
+	                </button>
+	                <div className="asset-preview-meta">
+	                  <strong>{previewTitle}</strong>
+	                  <span>{previewPath}</span>
+	                </div>
+	              </div>
+	              <div className="asset-preview-canvas">
+	                <img src={assetPreview.dataUrl} alt={previewTitle} />
+	              </div>
+            </div>
+          ) : imageData ? (
+            <div className="image-wrap">
+              <img
+                ref={imageRef}
+                src={imageData}
+                draggable={false}
+                alt={selectedPage?.name || "UI"}
+                onLoad={updateImageRenderInfo}
+              />
+              {imageRenderInfo && !annotationMode
+                ? sliceSelections.map((selection, index) => {
+                    const displayRect = naturalToDisplaySelection(selection.selection, imageRenderInfo);
+                    return (
+                      <button
+                        className={
+                          selectedSelectionId === selection.id
+                            ? "selection-box saved active"
+                            : "selection-box saved"
+                        }
+                        key={selection.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedSelectionId(selection.id);
+                        }}
+                        onContextMenu={(event) => {
+                          openDeleteContextMenu(event, {
+                            type: "slice",
+                            id: selection.id,
+                            label: selection.name
+                          });
+                        }}
+                        style={{
+                          left: displayRect.x,
+                          top: displayRect.y,
+                          width: displayRect.width,
+                          height: displayRect.height
+                        }}
+                        type="button"
+                        title={`${selection.name}，右键删除`}
+                      >
+                        {index + 1}
+                      </button>
+                    );
+                  })
+                : null}
+              {imageRenderInfo && annotationMode
+                ? pageAnnotations.map((annotation, index) => {
+                    const displayRect = naturalToDisplaySelection(annotation.selection, imageRenderInfo);
+                    return (
+                      <button
+                        className="annotation-box"
+                        key={annotation.id}
+                        onContextMenu={(event) => {
+                          openDeleteContextMenu(event, {
+                            type: "annotation",
+                            id: annotation.id,
+                            label: `批注 ${index + 1}`
+                          });
+                        }}
+                        style={{
+                          left: displayRect.x,
+                          top: displayRect.y,
+                          width: displayRect.width,
+                          height: displayRect.height
+                        }}
+                        title={annotation.note}
+                        type="button"
+                      >
+                        批注 {index + 1}
+                      </button>
+                    );
+                  })
+                : null}
+              {dragSelection ? (
+                <div
+                  className={annotationMode ? "selection-box annotation-draft" : "selection-box"}
+                  style={{
+                    left: dragSelection.x,
+                    top: dragSelection.y,
+                    width: dragSelection.width,
+                    height: dragSelection.height
+                  }}
+                />
+              ) : null}
+              {annotationPopover ? (
+                <div
+                  className="annotation-popover"
+                  style={{
+                    left: Math.min(annotationPopover.displaySelection.x + annotationPopover.displaySelection.width + 8, 560),
+                    top: annotationPopover.displaySelection.y
+                  }}
+                >
+                  <input
+                    value={annotationPopover.note}
+                    onChange={(event) =>
+                      setAnnotationPopover({
+                        ...annotationPopover,
+                        note: event.target.value
+                      })
+                    }
+                    placeholder="添加批注..."
+                    autoFocus
+                  />
+                  <button className="primary-button compact" onClick={submitAnnotation} type="button">
+                    添加
+                  </button>
+                  <button
+                    className="secondary-button compact"
+                    onClick={() => setAnnotationPopover(null)}
+                    type="button"
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="empty-state">暂无界面图片</div>
+          )}
+        </div>
+
+        <div className="asset-strip">
+          {sliceSelections.length === 0 ? (
+            <span>暂无切图区域</span>
+          ) : (
+            sliceSelections.map((selection, index) => {
+              const linkedAsset = pageAssets.find((asset) => asset.id === selection.assetId);
+              return (
+                <div
+                  className={
+                    selectedSelectionId === selection.id
+                      ? "slice-selection-item active"
+                      : "slice-selection-item"
+                  }
+                  key={selection.id}
+                  onClick={() => {
+                    setSelectedSelectionId(selection.id);
+                    if (linkedAsset) {
+                      void previewSliceAsset(linkedAsset);
+                    } else {
+                      setAssetPreview(null);
+                    }
+                  }}
+                  ref={selectedSelectionId === selection.id ? selectedSliceItemRef : undefined}
+                >
+                  <strong>{index + 1}</strong>
+                  <input
+                    value={selection.name}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) =>
+                      setSliceSelections((current) =>
+                        current.map((item) =>
+                          item.id === selection.id ? { ...item, name: event.target.value } : item
+                        )
+                      )
+                    }
+                    onBlur={(event) => updateSliceSelection(selection.id, { name: event.target.value })}
+                    aria-label="切图名称"
+                  />
+                  <span>{linkedAsset ? linkedAsset.id : formatSelectionStatus(selection.status)}</span>
+                  <button
+                    className="secondary-button compact slice-preview-button"
+                    disabled={!linkedAsset}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (linkedAsset) {
+                        setSelectedSelectionId(selection.id);
+                        void previewSliceAsset(linkedAsset);
+                      }
+                    }}
+                    title={linkedAsset ? "查看切图素材" : "素材生成后可查看"}
+                    type="button"
+                  >
+                    <Eye size={14} />
+                    查看
+                  </button>
+                  <button
+                    className="icon-button compact"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setContextMenu({
+                        x: event.clientX,
+                        y: event.clientY,
+                        type: "slice",
+                        id: selection.id,
+                        label: selection.name
+                      });
+                    }}
+                    title="删除切图区域"
+                    type="button"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {selectedSliceSelection ? (
+          <div className="slice-selection-editor">
+            <label>
+              <span>素材描述</span>
+              <div className="slice-description-readonly">
+                {selectedSliceSelection.prompt.trim() || "生成素材后由 Codex 根据参考图和框选位置自动填写"}
+              </div>
+            </label>
+          </div>
+        ) : null}
+
+        <div className="image-task-area">
+          {activeImageTask ? (
+            <TaskStatus task={activeImageTask} onCancel={onCancelImageTask} />
+          ) : null}
+          {imageStreamEvents.length > 0 ? (
+            <AiStreamPanel events={imageStreamEvents} endRef={imageStreamEndRef} compact />
+          ) : null}
+        </div>
+
+	        <div className="prompt-bar">
+	          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="输入界面风格"
+          />
+          <button
+            className="primary-button send-button"
+            onClick={generatePageImage}
+            disabled={!selectedPage || Boolean(activeImageTask)}
+          >
+            <Send size={18} />
+	            {activeImageTask ? "处理中" : "生成图片"}
+	          </button>
+	        </div>
+        {contextMenu ? (
+          <div
+            className={contextMenu.type === "slice" ? "canvas-context-menu slice-action-menu" : "canvas-context-menu"}
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {contextMenu.type === "slice" ? (
+              <>
+                <span>切图区域：{contextMenu.label}</span>
+                <textarea
+                  value={singleSliceNote}
+                  onChange={(event) => setSingleSliceNote(event.target.value)}
+                  placeholder="本次单独切图备注，例如：补上左侧阴影、不要包含背景、多切了右侧按钮..."
+                  rows={3}
+                  autoFocus
+                />
+                <div className="canvas-context-actions">
+                  <button
+                    className="primary-button compact"
+                    disabled={Boolean(activeImageTask)}
+                    onClick={() => generateSingleSlice(contextMenu.id, singleSliceNote)}
+                    type="button"
+                  >
+                    单独切图
+                  </button>
+                  <button className="danger-button compact" onClick={confirmContextDelete} type="button">
+                    删除区域
+                  </button>
+                  <button
+                    className="secondary-button compact"
+                    onClick={() => {
+                      setContextMenu(null);
+                      setSingleSliceNote("");
+                    }}
+                    type="button"
+                  >
+                    取消
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <span>删除 {contextMenu.label}？</span>
+                <button className="danger-button compact" onClick={confirmContextDelete} type="button">
+                  删除
+                </button>
+                <button className="secondary-button compact" onClick={() => setContextMenu(null)} type="button">
+                  取消
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
+	      </section>
+    </div>
+  );
+}
+
+function SettingsDialog({
+  onClose,
+  onError,
+  onNotice
+}: {
+  onClose: () => void;
+  onError: (message: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [codexArgs, setCodexArgs] = useState("");
+
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((value) => {
+        setSettings(value);
+        setCodexArgs(value.codex.args.join("\n"));
+      })
+      .catch((err) => onError(toErrorMessage(err)));
+  }, [onError]);
+
+  async function save() {
+    if (!settings) {
+      return;
+    }
+
+    try {
+      await api.saveSettings({
+        codex: {
+          ...settings.codex,
+          args: splitLines(codexArgs)
+        }
+      });
+      onNotice("设置已保存");
+      onClose();
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  const timeoutMinutes = settings ? Math.max(1, Math.round(settings.codex.timeoutMs / 60_000)) : 30;
+
+  return (
+    <Dialog title="设置" onClose={onClose}>
+      {settings ? (
+        <>
+          <label className="field">
+            <span>Codex 命令</span>
+            <input
+              value={settings.codex.command}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  codex: { ...settings.codex, command: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Codex 参数</span>
+            <textarea value={codexArgs} onChange={(event) => setCodexArgs(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Codex 超时分钟数</span>
+            <input
+              min={1}
+              type="number"
+              value={timeoutMinutes}
+              onChange={(event) => {
+                const minutes = Number(event.target.value);
+
+                if (!Number.isFinite(minutes) || minutes <= 0) {
+                  return;
+                }
+
+                setSettings({
+                  ...settings,
+                  codex: {
+                    ...settings.codex,
+                    timeoutMs: Math.round(minutes * 60_000)
+                  }
+                });
+              }}
+            />
+          </label>
+          <div className="dialog-actions">
+            <button className="secondary-button" onClick={onClose}>
+              取消
+            </button>
+            <button className="primary-button" onClick={save}>
+              <Check size={16} />
+              保存
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="empty-state compact">加载中</div>
+      )}
+    </Dialog>
+  );
+}
+
+function Dialog({
+  title,
+  children,
+  onClose
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="modal" role="dialog" aria-modal="true">
+        <div className="modal-header">
+          <h2>{title}</h2>
+          <button className="icon-button" onClick={onClose} title="关闭">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function toNaturalSelection(
+  selection: SelectionRect,
+  displayedRect: DOMRect,
+  image: HTMLImageElement
+): SelectionRect {
+  return selectionToNatural(
+    selection,
+    { width: displayedRect.width, height: displayedRect.height },
+    { width: image.naturalWidth, height: image.naturalHeight }
+  );
+}
+
+function naturalToDisplaySelection(
+  selection: SelectionRect,
+  image: { width: number; height: number; naturalWidth: number; naturalHeight: number }
+): SelectionRect {
+  const scaleX = image.width / image.naturalWidth;
+  const scaleY = image.height / image.naturalHeight;
+
+  return {
+    x: Math.round(selection.x * scaleX),
+    y: Math.round(selection.y * scaleY),
+    width: Math.max(1, Math.round(selection.width * scaleX)),
+    height: Math.max(1, Math.round(selection.height * scaleY))
+  };
+}
+
+function normalizeRect(
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+): SelectionRect {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.max(1, Math.abs(end.x - start.x)),
+    height: Math.max(1, Math.abs(end.y - start.y))
+  };
+}
+
+function clampPoint(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+  return {
+    x: Math.min(Math.max(x, 0), rect.width),
+    y: Math.min(Math.max(y, 0), rect.height)
+  };
+}
+
+function splitLines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function createTaskId(): string {
+  return globalThis.crypto?.randomUUID?.() || `task_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function createClientId(prefix: string): string {
+  const id = globalThis.crypto?.randomUUID?.().replace(/-/g, "").slice(0, 16) ||
+    `${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
+
+  return `${prefix}_${id}`;
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatSelectionStatus(status: SliceSelectionMeta["status"]): string {
+  switch (status) {
+    case "generated":
+      return "已生成";
+    case "failed":
+      return "失败";
+    case "pending":
+      return "待生成";
+  }
+}
+
+function formatImageAnnotationPrompt(annotation: PageImageAnnotation): string {
+  const rect = annotation.selection;
+
+  return [
+    `针对参考图片 ${annotation.sourceImagePath} 的批注：`,
+    `批注 ID：${annotation.id}`,
+    `区域：x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}`,
+    annotation.note
+  ].join("\n");
+}
+
+function removeImageAnnotationPrompt(value: string, annotationId: string): string {
+  const pattern = new RegExp(
+    `(^|\\n\\n)针对参考图片 [\\s\\S]*?批注 ID：${escapeRegExp(annotationId)}[\\s\\S]*?(?=\\n\\n针对参考图片 |$)`,
+    "u"
+  );
+
+  return value
+    .replace(pattern, "")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function formatStreamLevel(level: AiStreamEvent["level"]): string {
+  switch (level) {
+    case "status":
+      return "状态";
+    case "stdout":
+      return "输出";
+    case "stderr":
+      return "日志";
+    case "complete":
+      return "完成";
+    case "error":
+      return "错误";
+  }
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function toErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const withoutIpcPrefix = raw.replace(/^Error invoking remote method '[^']+': Error:\s*/u, "");
+
+  if (withoutIpcPrefix.length <= 260) {
+    return withoutIpcPrefix;
+  }
+
+  return `${withoutIpcPrefix.slice(0, 260)}...`;
+}

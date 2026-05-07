@@ -1,0 +1,11 @@
+node_modules/
+dist-renderer/
+dist-electron/
+coverage/
+.idea/
+.playwright-mcp/
+tmp/
+.DS_Store
+*.log
+logs/
+.env

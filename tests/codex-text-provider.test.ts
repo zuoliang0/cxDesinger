@@ -1,0 +1,72 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { CodexTextProvider } from "../electron/main/services/codex-text-provider";
+
+async function makeCodexShim(fixturePath: string): Promise<string> {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "fake-codex-bin-"));
+  const commandPath = path.join(rootDir, "codex");
+
+  await fs.writeFile(commandPath, `#!/usr/bin/env node\nrequire(${JSON.stringify(fixturePath)});\n`, "utf8");
+  await fs.chmod(commandPath, 0o755);
+  return commandPath;
+}
+
+describe("CodexTextProvider", () => {
+  it("parses structured planning output from codex exec", async () => {
+    const provider = new CodexTextProvider({
+      command: process.execPath,
+      args: [path.resolve("tests/fixtures/fake-codex.cjs")],
+      timeoutMs: 5_000
+    });
+
+    const output = await provider.runPlanning(process.cwd(), "做一个 AI 产品设计工具");
+
+    expect(output.documents.prd).toContain("PRD");
+    expect(output.documents.styleGuide).toContain("视觉规范");
+    expect(output.pages[0]).toMatchObject({
+      name: "项目首页",
+      route: "/projects"
+    });
+  });
+
+  it("parses document revision output and streams process chunks", async () => {
+    const command = await makeCodexShim(path.resolve("tests/fixtures/fake-doc-codex.cjs"));
+    const provider = new CodexTextProvider({
+      command,
+      args: [],
+      timeoutMs: 5_000
+    });
+    const events: Array<{ level: string; message: string }> = [];
+
+    const output = await provider.reviseDocument(
+      process.cwd(),
+      "docs/prd.md",
+      "补充儿童涂色流程",
+      {
+        model: "gpt-5.4",
+        reasoningEffort: "high",
+        onEvent: (level, message) => events.push({ level, message })
+      }
+    );
+
+    expect(output).toMatchObject({
+      content: expect.stringContaining("已按修改意见更新当前文档"),
+      summary: "高思考 gpt-5.4"
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "stdout", message: expect.stringContaining("revising markdown") }),
+        expect.objectContaining({ level: "stderr", message: expect.stringContaining("progress detail") }),
+        expect.objectContaining({ level: "complete" })
+      ])
+    );
+    expect(events.map((event) => event.message).join("\n")).not.toContain("codex_core::plugins::manifest");
+    expect(events.map((event) => event.message).join("\n")).not.toContain("codex_core_skills::loader");
+    expect(events.map((event) => event.message).join("\n")).not.toContain("codex_rmcp_client::stdio_server_launcher");
+    expect(events.map((event) => event.message).join("\n")).not.toContain("icon path must not contain");
+    expect(events.map((event) => event.message).join("\n")).not.toContain("Failed to terminate MCP process group");
+    expect(events.map((event) => event.message).join("\n")).not.toContain("could not update PATH");
+  });
+});
