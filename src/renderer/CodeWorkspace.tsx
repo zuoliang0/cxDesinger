@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import type { ProjectFileNode, ProjectInfo, ReadProjectFileResult } from "../shared/types";
 import { createDemoApi } from "./demo-api";
+import { useI18n } from "./i18n";
 
 const api = window.aiProductDesigner ?? createDemoApi();
 
@@ -66,6 +67,7 @@ export function CodeWorkspace({
   onError: (message: string) => void;
   onNotice: (message: string) => void;
 }) {
+  const { t } = useI18n();
   const [files, setFiles] = useState<ProjectFileNode[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([""]));
   const [tabs, setTabs] = useState<WorkspaceTab[]>([HOME_TAB]);
@@ -104,7 +106,7 @@ export function CodeWorkspace({
 
   function openFile(node: ProjectFileNode) {
     if (!node.editable) {
-      onError("当前文件不是可编辑文本文件");
+      onError(t("当前文件不是可编辑文本文件"));
       return;
     }
 
@@ -151,7 +153,7 @@ export function CodeWorkspace({
     const tab: WorkspaceTab = {
       id: makeTabId("file"),
       kind: "file",
-      title: `${activeTab.title} 副本`,
+        title: t("{title} 副本", { title: activeTab.title }),
       path: activeTab.path,
       closable: true
     };
@@ -166,7 +168,7 @@ export function CodeWorkspace({
       return;
     }
 
-    if (dirtyTabs[tabId] && !window.confirm("当前文件有未保存修改，确认关闭吗？")) {
+    if (dirtyTabs[tabId] && !window.confirm(t("当前文件有未保存修改，确认关闭吗？"))) {
       return;
     }
 
@@ -192,14 +194,14 @@ export function CodeWorkspace({
       <aside className="sidebar code-sidebar">
         <div className="panel-title">
           <Folder size={16} />
-          <span>项目文件</span>
-          <button className="icon-button compact" onClick={() => refreshFiles().catch((err) => onError(toErrorMessage(err)))} title="刷新文件树">
+          <span>{t("项目文件")}</span>
+          <button className="icon-button compact" onClick={() => refreshFiles().catch((err) => onError(toErrorMessage(err)))} title={t("刷新文件树")}>
             {loadingFiles ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
           </button>
         </div>
         <div className="file-tree">
           {files.length === 0 && !loadingFiles ? (
-            <div className="empty-state small">暂无文件</div>
+            <div className="empty-state small">{t("暂无文件")}</div>
           ) : (
             files.map((node) => (
               <FileTreeNode
@@ -254,7 +256,7 @@ export function CodeWorkspace({
           </div>
           <button className="secondary-button compact" onClick={duplicateActiveTab}>
             <Copy size={14} />
-            复制标签
+            {t("复制标签")}
           </button>
         </div>
 
@@ -310,6 +312,7 @@ function FileTreeNode({
   onToggle: (path: string) => void;
   onOpenFile: (node: ProjectFileNode) => void;
 }) {
+  const { t } = useI18n();
   const expanded = expandedPaths.has(node.path);
 
   if (node.type === "directory") {
@@ -341,7 +344,7 @@ function FileTreeNode({
     <button
       className={node.editable ? "file-tree-row" : "file-tree-row disabled"}
       onClick={() => onOpenFile(node)}
-      title={node.editable ? node.path : "不可编辑的文件"}
+      title={node.editable ? node.path : t("不可编辑的文件")}
     >
       <span className="tree-spacer" />
       <File size={14} />
@@ -361,6 +364,7 @@ function CodexTerminal({
   active: boolean;
   onError: (message: string) => void;
 }) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -401,7 +405,7 @@ function CodexTerminal({
     });
     const unsubscribeExit = api.onCodeTerminalExit((event) => {
       if (event.terminalId === sessionTerminalIdRef.current) {
-        terminal.write(`\r\n[Codex 终端已退出：${event.exitCode ?? event.signal ?? "unknown"}]\r\n`);
+        terminal.write(`\r\n[${t("Codex 终端已退出：{code}", { code: event.exitCode ?? event.signal ?? "unknown" })}]\r\n`);
       }
     });
 
@@ -467,6 +471,7 @@ function FileEditor({
   onNotice: (message: string) => void;
   onSaved: () => void;
 }) {
+  const { t } = useI18n();
   const [file, setFile] = useState<ReadProjectFileResult | null>(null);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
@@ -518,7 +523,7 @@ function FileEditor({
       });
       onDirtyChange(false);
       onSaved();
-      onNotice(`已保存：${relativePath}`);
+      onNotice(t("已保存：{path}", { path: relativePath }));
     } catch (err) {
       onError(toErrorMessage(err));
     } finally {
@@ -530,7 +535,7 @@ function FileEditor({
     const parser = getPrettierParser(relativePath);
 
     if (!parser) {
-      onError("当前文件类型暂不支持格式化");
+      onError(t("当前文件类型暂不支持格式化"));
       return;
     }
 
@@ -538,9 +543,9 @@ function FileEditor({
 
     try {
       setContent(await formatCode(content, parser));
-      onNotice(`已格式化：${relativePath}`);
+      onNotice(t("已格式化：{path}", { path: relativePath }));
     } catch (err) {
-      onError(`格式化失败：${toErrorMessage(err)}`);
+      onError(t("格式化失败：{message}", { message: toErrorMessage(err) }));
     } finally {
       setFormatting(false);
     }
@@ -556,20 +561,20 @@ function FileEditor({
         <div className="toolbar-group">
           <button className="secondary-button compact" onClick={formatFile} disabled={loading || formatting}>
             {formatting ? <Loader2 className="spin" size={14} /> : <Wand2 size={14} />}
-            格式化
+            {t("格式化")}
           </button>
           <button className="secondary-button compact" onClick={() => loadFile().catch((err) => onError(toErrorMessage(err)))} disabled={loading}>
             {loading ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
-            重新加载
+            {t("重新加载")}
           </button>
           <button className="primary-button compact" onClick={saveFile} disabled={!dirty || saving || loading}>
             {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
-            保存
+            {t("保存")}
           </button>
         </div>
       </div>
       {loading ? (
-        <div className="empty-state">正在读取文件</div>
+        <div className="empty-state">{t("正在读取文件")}</div>
       ) : (
         <CodeMirror
           className="code-editor"

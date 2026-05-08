@@ -2,6 +2,7 @@ import { useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { Check, MessageCircle, X } from "lucide-react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useI18n } from "./i18n";
 
 type AnnotatableTag = "h1" | "h2" | "h3" | "p" | "li" | "pre" | "blockquote" | "table";
 
@@ -29,6 +30,7 @@ interface AnnotatableBlockProps {
 }
 
 export function MarkdownDocument({ content, documentPath, onAddComment }: MarkdownDocumentProps) {
+  const { t } = useI18n();
   const components: Components = {
     h1: createAnnotatableComponent("h1", onAddComment),
     h2: createAnnotatableComponent("h2", onAddComment),
@@ -41,7 +43,7 @@ export function MarkdownDocument({ content, documentPath, onAddComment }: Markdo
   };
 
   if (!content.trim()) {
-    return <div className="empty-state compact">暂无内容</div>;
+    return <div className="empty-state compact">{t("暂无内容")}</div>;
   }
 
   return (
@@ -84,6 +86,7 @@ function AnnotatableBlock({
   onAddComment,
   passthroughProps
 }: AnnotatableBlockProps) {
+  const { t } = useI18n();
   const [isEditing, setIsEditing] = useState(false);
   const [comment, setComment] = useState("");
   const canComment = typeof line === "number";
@@ -105,7 +108,7 @@ function AnnotatableBlock({
       <button
         className="comment-anchor-button"
         type="button"
-        title={`添加备注：第 ${line} 行`}
+        title={t("添加备注：第 {line} 行", { line })}
         onClick={() => setIsEditing(true)}
       >
         <MessageCircle size={14} />
@@ -125,15 +128,15 @@ function AnnotatableBlock({
                 setComment("");
               }
             }}
-            placeholder="添加评论..."
+            placeholder={t("添加评论...")}
             autoFocus
           />
-          <button type="button" title="确认备注" onClick={submitComment}>
+          <button type="button" title={t("确认备注")} onClick={submitComment}>
             <Check size={14} />
           </button>
           <button
             type="button"
-            title="取消备注"
+            title={t("取消备注")}
             onClick={() => {
               setIsEditing(false);
               setComment("");

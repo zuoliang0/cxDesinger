@@ -143,7 +143,27 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("projects:create", (_event, input) => projectService.createProject(input));
-  ipcMain.handle("projects:open", (_event, rootDir: string) => projectService.openProject(rootDir));
+  ipcMain.handle("projects:open", async (_event, rootDir: string) => {
+    try {
+      return await projectService.openProject(rootDir);
+    } catch (error) {
+      if (!isPermissionDeniedError(error)) {
+        throw error;
+      }
+
+      const result = await dialog.showOpenDialog({
+        title: "Grant Project Folder Access / 重新授权项目文件夹",
+        defaultPath: rootDir,
+        properties: ["openDirectory"]
+      });
+
+      if (result.canceled || !result.filePaths[0]) {
+        throw error;
+      }
+
+      return projectService.openProject(result.filePaths[0]);
+    }
+  });
 
   ipcMain.handle("planning:run", async (event, input: RunPlanningInput) => {
     const signal = beginTask(input.taskId);
@@ -431,6 +451,10 @@ function registerIpc(): void {
   ipcMain.handle("settings:save", (_event, settings: AppSettings) =>
     settingsService.saveSettings(settings)
   );
+}
+
+function isPermissionDeniedError(error: unknown): boolean {
+  return error instanceof Error && /\bEPERM\b|\bEACCES\b/u.test(error.message);
 }
 
 app.whenReady().then(() => {

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 import {
   ArrowLeft,
-  Archive,
   Boxes,
   Check,
   Code2,
@@ -40,6 +39,7 @@ import type {
 import { formatDocumentComment } from "./comment-format";
 import { CodeWorkspace } from "./CodeWorkspace";
 import { createDemoApi } from "./demo-api";
+import { useI18n, type Locale } from "./i18n";
 import { MarkdownDocument } from "./MarkdownDocument";
 import { selectionToNatural } from "./selection";
 import { getCurrentTaskLabel } from "./task-status";
@@ -61,6 +61,7 @@ type PageAssetPreview =
 const api = window.aiProductDesigner ?? createDemoApi();
 
 export function App() {
+  const { locale, setLocale, t } = useI18n();
   const [projects, setProjects] = useState<ProjectIndexEntry[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [screen, setScreen] = useState<Screen>("home");
@@ -139,7 +140,7 @@ export function App() {
             taskId: id,
             scope: "image",
             level: "complete",
-            message: `任务结束，耗时 ${formatElapsed(Date.now() - task.startedAt)}`,
+            message: t("任务结束，耗时 {time}", { time: formatElapsed(Date.now() - task.startedAt) }),
             createdAt: new Date().toISOString()
           }
         ]
@@ -175,7 +176,7 @@ export function App() {
           taskId: task.id,
           scope: "image",
           level: "error",
-          message: "已请求停止当前页面的 Codex 调用",
+          message: t("已请求停止当前页面的 Codex 调用"),
           createdAt: new Date().toISOString()
         }
       ]
@@ -187,7 +188,7 @@ export function App() {
   }
 
   async function openProject(rootDir: string) {
-    setBusyText("正在打开项目");
+    setBusyText(t("正在打开项目"));
     setError("");
 
     try {
@@ -221,18 +222,26 @@ export function App() {
       return;
     }
 
-    setBusyText("正在导出项目");
+    setBusyText(t("正在导出项目"));
     setError("");
     setNotice("");
 
     try {
       const result = await api.exportProjectZip({ projectRoot: project.rootDir });
-      setNotice(`已导出：${result.zipPath}`);
+      setNotice(t("已导出：{path}", { path: result.zipPath }));
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setBusyText("");
     }
+  }
+
+  function closeProject() {
+    setProject(null);
+    setScreen("home");
+    setError("");
+    setNotice("");
+    refreshProjects().catch((err) => setError(toErrorMessage(err)));
   }
 
   return (
@@ -256,48 +265,52 @@ export function App() {
                 onClick={() => setScreen("planning")}
               >
                 <FileText size={16} />
-                产品规划
+                {t("产品规划")}
               </button>
               <button
                 className={screen === "pages" ? "toolbar-button active" : "toolbar-button"}
                 onClick={() => setScreen("pages")}
               >
                 <Layers size={16} />
-                页面管理
+                {t("页面管理")}
               </button>
               <button
                 className={screen === "code" ? "toolbar-button active" : "toolbar-button"}
                 onClick={() => setScreen("code")}
               >
                 <Code2 size={16} />
-                代码编写
+                {t("代码编写")}
               </button>
-              <button className="icon-button" onClick={exportProject} title="导出项目">
+              <button className="icon-button" onClick={exportProject} title={t("导出项目")}>
                 <Download size={18} />
-              </button>
-              <button
-                className="icon-button"
-                onClick={() => {
-                  setProject(null);
-                  setScreen("home");
-                  refreshProjects().catch((err) => setError(toErrorMessage(err)));
-                }}
-                title="返回项目列表"
-              >
-                <Archive size={18} />
               </button>
             </>
           ) : null}
-          <button className="icon-button" onClick={() => setSettingsOpen(true)} title="设置">
+          <select
+            className="language-picker"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+            aria-label="Language"
+          >
+            <option value="en">EN</option>
+            <option value="zh-CN">中文</option>
+            <option value="de">Deutsch</option>
+          </select>
+          <button className="icon-button" onClick={() => setSettingsOpen(true)} title={t("设置")}>
             <Settings size={18} />
           </button>
+          {project ? (
+            <button className="icon-button" onClick={closeProject} title={t("关闭项目并返回主页")}>
+              <X size={18} />
+            </button>
+          ) : null}
         </div>
       </header>
 
       {error ? (
         <div className="toast error">
           <span>{error}</span>
-          <button onClick={() => setError("")} title="关闭">
+          <button onClick={() => setError("")} title={t("关闭")}>
             <X size={14} />
           </button>
         </div>
@@ -305,7 +318,7 @@ export function App() {
       {notice ? (
         <div className="toast notice">
           <span>{notice}</span>
-          <button onClick={() => setNotice("")} title="关闭">
+          <button onClick={() => setNotice("")} title={t("关闭")}>
             <X size={14} />
           </button>
         </div>
@@ -402,28 +415,30 @@ function HomeView({
   onChooseProject: () => void;
   onOpenProject: (rootDir: string) => void;
 }) {
+  const { locale, t } = useI18n();
+
   return (
     <section className="home-layout">
       <div className="section-header">
         <div>
-          <h1>项目</h1>
-          <span>{projects.length} 个项目</span>
+          <h1>{t("项目")}</h1>
+          <span>{t("{count} 个项目", { count: projects.length })}</span>
         </div>
         <div className="section-actions">
           <button className="secondary-button" onClick={onChooseProject}>
             <FolderOpen size={18} />
-            打开项目
+            {t("打开项目")}
           </button>
           <button className="primary-button" onClick={onNewProject}>
             <Plus size={18} />
-            新建项目
+            {t("新建项目")}
           </button>
         </div>
       </div>
 
       <div className="project-list">
         {projects.length === 0 ? (
-          <div className="empty-state">暂无项目</div>
+          <div className="empty-state">{t("暂无项目")}</div>
         ) : (
           projects.map((item) => (
             <button className="project-row" key={item.id} onClick={() => onOpenProject(item.rootDir)}>
@@ -431,7 +446,7 @@ function HomeView({
                 <strong>{item.name}</strong>
                 <span>{item.rootDir}</span>
               </div>
-              <time>{formatDate(item.updatedAt)}</time>
+              <time>{formatDate(item.updatedAt, locale)}</time>
             </button>
           ))
         )}
@@ -451,6 +466,7 @@ function NewProjectDialog({
   onBusy: (message: string) => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [rootDir, setRootDir] = useState("");
   const [projectType, setProjectType] = useState<ProjectType>("web");
@@ -463,7 +479,7 @@ function NewProjectDialog({
   }
 
   async function createProject() {
-    onBusy("正在创建项目");
+    onBusy(t("正在创建项目"));
     onError("");
 
     try {
@@ -477,22 +493,22 @@ function NewProjectDialog({
   }
 
   return (
-    <Dialog title="新建项目" onClose={onClose}>
+    <Dialog title={t("新建项目")} onClose={onClose}>
       <label className="field">
-        <span>项目名称</span>
+        <span>{t("项目名称")}</span>
         <input value={name} onChange={(event) => setName(event.target.value)} autoFocus />
       </label>
       <label className="field">
-        <span>项目根目录</span>
+        <span>{t("项目根目录")}</span>
         <div className="inline-field">
           <input value={rootDir} onChange={(event) => setRootDir(event.target.value)} />
-          <button className="icon-button" onClick={chooseDirectory} title="选择目录">
+          <button className="icon-button" onClick={chooseDirectory} title={t("选择目录")}>
             <FolderOpen size={18} />
           </button>
         </div>
       </label>
       <label className="field">
-        <span>项目类型</span>
+        <span>{t("项目类型")}</span>
         <select value={projectType} onChange={(event) => setProjectType(event.target.value as ProjectType)}>
           <option value="web">WEB</option>
           <option value="app">APP</option>
@@ -500,11 +516,11 @@ function NewProjectDialog({
       </label>
       <div className="dialog-actions">
         <button className="secondary-button" onClick={onClose}>
-          取消
+          {t("取消")}
         </button>
         <button className="primary-button" onClick={createProject}>
           <Check size={16} />
-          确定
+          {t("确定")}
         </button>
       </div>
     </Dialog>
@@ -520,9 +536,10 @@ function PlanningView({
   onProjectChange: (project: ProjectInfo) => void;
   onError: (message: string) => void;
 }) {
+  const { t, locale } = useI18n();
   const [requirement, setRequirement] = useState(() =>
     project.meta.documents.length === 0
-      ? createInitialProjectPrompt(project.meta.project.type || "web")
+      ? createInitialProjectPrompt(project.meta.project.type || "web", locale)
       : ""
   );
   const [selectedModel, setSelectedModel] = useState<CodexModel>("gpt-5.5");
@@ -592,7 +609,7 @@ function PlanningView({
     const nextTask = hasSelectedDocument
       ? {
           id: taskId,
-          label: `修改当前文档：${selectedDoc?.path}`,
+          label: t("修改当前文档：{path}", { path: selectedDoc?.path || "" }),
           scope: "document" as const,
           startedAt: Date.now()
         }
@@ -651,7 +668,7 @@ function PlanningView({
     setStreamEvents([]);
     setActiveTask({
       id: taskId,
-      label: "同步页面规划到 pages.json",
+      label: t("同步页面规划到 pages.json"),
       scope: "page-plan",
       startedAt: Date.now()
     });
@@ -682,7 +699,8 @@ function PlanningView({
     const nextComment = formatDocumentComment({
       documentPath: selectedDoc.path,
       line,
-      comment
+      comment,
+      locale
     });
 
     setRequirement((current) => {
@@ -711,7 +729,7 @@ function PlanningView({
           taskId,
           scope: current.scope,
           level: "complete",
-          message: `任务结束，耗时 ${formatElapsed(Date.now() - current.startedAt)}`,
+          message: t("任务结束，耗时 {time}", { time: formatElapsed(Date.now() - current.startedAt) }),
           createdAt: new Date().toISOString()
         }
       ]);
@@ -728,11 +746,11 @@ function PlanningView({
       <aside className="sidebar">
         <div className="panel-title">
           <FileText size={16} />
-          <span>文档</span>
+          <span>{t("文档")}</span>
         </div>
         <div className="nav-list">
           {project.meta.documents.length === 0 ? (
-            <div className="empty-state compact">暂无文档</div>
+            <div className="empty-state compact">{t("暂无文档")}</div>
           ) : (
             project.meta.documents.map((doc) => (
               <button
@@ -757,7 +775,7 @@ function PlanningView({
                 disabled={Boolean(activeTask)}
               >
                 <RefreshCw size={16} />
-                同步到 pages.json
+                {t("同步到 pages.json")}
               </button>
             </div>
           ) : null}
@@ -768,7 +786,7 @@ function PlanningView({
               onAddComment={addDocumentComment}
             />
           ) : (
-            <div className="empty-state compact">暂无文档</div>
+            <div className="empty-state compact">{t("暂无文档")}</div>
           )}
         </div>
         <div className="planning-input-area">
@@ -780,20 +798,20 @@ function PlanningView({
             <textarea
               value={requirement}
               onChange={(event) => setRequirement(event.target.value)}
-              placeholder={selectedDoc ? "描述对当前文档的修改意见" : "描述要创建的产品和规划任务"}
+              placeholder={selectedDoc ? t("描述对当前文档的修改意见") : t("描述要创建的产品和规划任务")}
             />
             <label className="model-picker">
-              <span>模型</span>
+              <span>{t("模型")}</span>
               <select
                 value={selectedModel}
                 onChange={(event) => setSelectedModel(event.target.value as CodexModel)}
                 disabled={Boolean(activeTask)}
-                aria-label="选择模型"
+                aria-label={t("选择模型")}
               >
                 <option value="gpt-5.5">GPT-5.5</option>
                 <option value="gpt-5.4">GPT-5.4</option>
               </select>
-              <small>高思考</small>
+              <small>{t("高思考")}</small>
             </label>
             <button
               className="primary-button send-button"
@@ -801,7 +819,7 @@ function PlanningView({
               disabled={Boolean(activeTask) || !requirement.trim()}
             >
               <Send size={18} />
-              {activeTask ? "处理中" : "发送"}
+              {activeTask ? t("处理中") : t("发送")}
             </button>
           </div>
         </div>
@@ -817,6 +835,7 @@ function TaskStatus({
   task: { label: string; startedAt: number };
   onCancel?: () => void;
 }) {
+  const { t } = useI18n();
   const elapsedMs = useElapsedMs(task.startedAt);
 
   return (
@@ -827,7 +846,7 @@ function TaskStatus({
       {onCancel ? (
         <button className="danger-button compact" onClick={onCancel} type="button">
           <Square size={13} />
-          停止
+          {t("停止")}
         </button>
       ) : null}
     </div>
@@ -843,9 +862,11 @@ function PageTaskIndicator({
   result?: ImageTaskResult;
   onClear: () => void;
 }) {
+  const { t } = useI18n();
+
   if (running) {
     return (
-      <span className="page-task-indicator running" title="正在处理后台任务">
+      <span className="page-task-indicator running" title={t("正在处理后台任务")}>
         <Loader2 className="spin" size={14} />
       </span>
     );
@@ -861,7 +882,7 @@ function PageTaskIndicator({
         }}
         role="button"
         tabIndex={0}
-        title="任务完成，点击清除"
+        title={t("任务完成，点击清除")}
       >
         <Check size={14} />
       </span>
@@ -870,7 +891,7 @@ function PageTaskIndicator({
 
   if (result === "error") {
     return (
-      <span className="page-task-indicator error" title="任务失败">
+      <span className="page-task-indicator error" title={t("任务失败")}>
         <CircleAlert size={14} />
       </span>
     );
@@ -888,11 +909,13 @@ function AiStreamPanel({
   endRef: RefObject<HTMLDivElement>;
   compact?: boolean;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className={compact ? "ai-stream-panel compact" : "ai-stream-panel"} role="log" aria-live="polite">
       {events.map((event, index) => (
         <div className={`ai-stream-line ${event.level}`} key={`${event.createdAt}-${index}`}>
-          <span className="ai-stream-level">{formatStreamLevel(event.level)}</span>
+          <span className="ai-stream-level">{formatStreamLevel(event.level, t)}</span>
           <span>{event.message}</span>
         </div>
       ))}
@@ -937,6 +960,7 @@ function PagesView({
   onClearImageTaskResult: (pageId: string) => void;
   onCancelImageTask: (pageId: string) => void;
 }) {
+  const { t } = useI18n();
   const [selectedPageId, setSelectedPageId] = useState(project.meta.pages[0]?.id || "");
   const selectedPage = useMemo(
     () => project.meta.pages.find((page) => page.id === selectedPageId) || project.meta.pages[0],
@@ -1084,7 +1108,7 @@ function PagesView({
     const taskId = createTaskId();
     let taskResult: ImageTaskResult = "success";
 
-    onImageTaskStart(selectedPage.id, taskId, "正在生成当前页面图片");
+    onImageTaskStart(selectedPage.id, taskId, t("正在生成当前页面图片"));
     setAssetPreview(null);
     onError("");
 
@@ -1102,7 +1126,7 @@ function PagesView({
       setPageAnnotations([]);
       setAnnotationPopover(null);
       setAnnotationMode(false);
-      onNotice("界面图片已生成");
+      onNotice(t("界面图片已生成"));
     } catch (err) {
       taskResult = "error";
       onError(toErrorMessage(err));
@@ -1120,7 +1144,7 @@ function PagesView({
     let taskResult: ImageTaskResult = "success";
 
     setAssetPreview(null);
-    onImageTaskStart(selectedPage.id, taskId, "正在提取页面背景");
+    onImageTaskStart(selectedPage.id, taskId, t("正在提取页面背景"));
     onError("");
 
     try {
@@ -1132,7 +1156,7 @@ function PagesView({
         reasoningEffort: "high"
       });
       onProjectChange(updated);
-      onNotice("页面背景已提取并写入 pages.json");
+      onNotice(t("页面背景已提取并写入 pages.json"));
     } catch (err) {
       taskResult = "error";
       onError(toErrorMessage(err));
@@ -1165,7 +1189,7 @@ function PagesView({
     onImageTaskStart(
       selectedPage.id,
       taskId,
-      mode === "force" ? "正在强制重新生成切图素材" : "正在生成切图素材"
+      mode === "force" ? t("正在强制重新生成切图素材") : t("正在生成切图素材")
     );
     setAssetPreview(null);
     onError("");
@@ -1184,7 +1208,7 @@ function PagesView({
       onProjectChange(batchUpdated);
       setDragSelection(null);
       setSelectionMode(false);
-      onNotice(mode === "force" ? "切图已强制重新生成" : "切图生成已完成");
+      onNotice(mode === "force" ? t("切图已强制重新生成") : t("切图生成已完成"));
     } catch (err) {
       taskResult = "error";
       onError(toErrorMessage(err));
@@ -1205,7 +1229,7 @@ function PagesView({
     setSelectionMode(false);
     setAnnotationMode(false);
     setAnnotationPopover(null);
-    onImageTaskStart(selectedPage.id, taskId, "正在识别切图区域");
+    onImageTaskStart(selectedPage.id, taskId, t("正在识别切图区域"));
     onError("");
 
     try {
@@ -1217,7 +1241,7 @@ function PagesView({
         reasoningEffort: "high"
       });
       onProjectChange(updated);
-      onNotice("切图区域已识别，可确认后生成全部切图");
+      onNotice(t("切图区域已识别，可确认后生成全部切图"));
     } catch (err) {
       taskResult = "error";
       onError(toErrorMessage(err));
@@ -1234,7 +1258,7 @@ function PagesView({
     const taskId = createTaskId();
     let taskResult: ImageTaskResult = "success";
 
-    onImageTaskStart(selectedPage.id, taskId, "正在单独生成切图素材");
+    onImageTaskStart(selectedPage.id, taskId, t("正在单独生成切图素材"));
     setAssetPreview(null);
     onError("");
 
@@ -1254,7 +1278,7 @@ function PagesView({
       setSelectedSelectionId(selectionId);
       setContextMenu(null);
       setSingleSliceNote("");
-      onNotice("单独切图已完成");
+      onNotice(t("单独切图已完成"));
     } catch (err) {
       taskResult = "error";
       onError(toErrorMessage(err));
@@ -1366,7 +1390,7 @@ function PagesView({
       ...annotationPopover.annotation,
       note: annotationPopover.note.trim()
     };
-    const annotationText = formatImageAnnotationPrompt(annotation);
+    const annotationText = formatImageAnnotationPrompt(annotation, t);
 
     setPageAnnotations((current) => [...current, annotation]);
     setPrompt((current) => {
@@ -1426,15 +1450,17 @@ function PagesView({
   const activeSliceGenerateCount =
     sliceGenerateMode === "force" ? forcedSliceSelections.length : pendingSliceSelections.length;
   const sliceGenerateTargetText =
-    checkedSliceSelections.length > 0 ? `已选 ${checkedSliceSelections.length}` : "全部区域";
+    checkedSliceSelections.length > 0
+      ? t("已选 {count}", { count: checkedSliceSelections.length })
+      : t("全部区域");
   const activeVersion = imageVersions.find((version) => version.active);
   const selectedSliceSelection = sliceSelections.find((selection) => selection.id === selectedSelectionId);
   const selectedPreviewAsset = assetPreview?.kind === "slice"
     ? pageAssets.find((asset) => asset.id === assetPreview.assetId)
     : null;
   const previewTitle = assetPreview?.kind === "background"
-    ? "页面背景"
-    : selectedPreviewAsset?.name || "切图素材";
+    ? t("页面背景")
+    : selectedPreviewAsset?.name || t("切图素材");
   const previewPath = assetPreview?.kind === "background"
     ? assetPreview.path
     : selectedPreviewAsset?.path || "";
@@ -1600,11 +1626,11 @@ function PagesView({
       <aside className="sidebar">
         <div className="panel-title">
           <Layers size={16} />
-          <span>页面</span>
+          <span>{t("页面")}</span>
         </div>
         <div className="nav-list">
           {project.meta.pages.length === 0 ? (
-            <div className="empty-state compact">暂无页面</div>
+            <div className="empty-state compact">{t("暂无页面")}</div>
           ) : (
             project.meta.pages.map((page) => {
               const pageTask = imageTasks[page.id];
@@ -1636,26 +1662,26 @@ function PagesView({
       <section className="main-panel page-panel">
         <div className="page-toolbar">
           <div>
-            <h2>{selectedPage?.name || "页面"}</h2>
+            <h2>{selectedPage?.name || t("页面")}</h2>
             <span>{selectedPage?.route || ""}</span>
           </div>
           <div className="toolbar-group">
             {selectedPage?.needUpdate ? (
               <div className="page-update-hint">
                 <RefreshCw size={15} />
-                页面规划已更新，可以重新生成界面
+                {t("页面规划已更新，可以重新生成界面")}
               </div>
             ) : null}
             <label className="version-picker">
-              <span>版本</span>
+              <span>{t("版本")}</span>
               <select
                 value={activeVersion?.path || ""}
                 onChange={(event) => switchPageImageVersion(event.target.value)}
                 disabled={imageVersions.length === 0 || Boolean(activeImageTask)}
-                aria-label="选择页面图片版本"
+                aria-label={t("选择页面图片版本")}
               >
                 {imageVersions.length === 0 ? (
-                  <option value="">暂无版本</option>
+                  <option value="">{t("暂无版本")}</option>
                 ) : (
                   imageVersions.map((version) => (
                     <option value={version.path} key={version.path}>
@@ -1676,7 +1702,7 @@ function PagesView({
               disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
             >
               <Scissors size={16} />
-              切图
+              {t("切图")}
             </button>
             <button
               className={annotationMode ? "toolbar-button active" : "toolbar-button"}
@@ -1684,17 +1710,17 @@ function PagesView({
               disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
             >
               <FileText size={16} />
-              批注
+              {t("批注")}
             </button>
             <button
               className="toolbar-button"
               onClick={generatePageBackground}
               disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
-              title={selectedPage?.backgroundImagePath || "提取当前页面背景并写入 pages.json"}
+              title={selectedPage?.backgroundImagePath || t("提取当前页面背景并写入 pages.json")}
               type="button"
             >
               <Image size={16} />
-              {selectedPage?.backgroundImagePath ? "重提背景" : "提取背景"}
+              {selectedPage?.backgroundImagePath ? t("重提背景") : t("提取背景")}
             </button>
             {selectedPage?.backgroundImagePath ? (
               <button
@@ -1705,20 +1731,20 @@ function PagesView({
                 type="button"
               >
                 <Eye size={16} />
-                查看背景
+                {t("查看背景")}
               </button>
             ) : null}
             <button
               className="toolbar-button"
               onClick={identifySliceSelections}
               disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
-              title="让 AI 自动识别当前界面中适合切图的组件区域"
+              title={t("让 AI 自动识别当前界面中适合切图的组件区域")}
               type="button"
             >
               <Sparkles size={16} />
-              AI识别切图
+              {t("AI识别切图")}
             </button>
-            <div className="split-generate-control" title={`${sliceGenerateTargetText}，本次 ${activeSliceGenerateCount} 个`}>
+            <div className="split-generate-control" title={t("{target}，本次 {count} 个", { target: sliceGenerateTargetText, count: activeSliceGenerateCount })}>
               <button
                 className="primary-button"
                 onClick={() => generateSlice(sliceGenerateMode)}
@@ -1731,17 +1757,17 @@ function PagesView({
                 type="button"
               >
                 <Image size={16} />
-                生成切图
+                {t("生成切图")}
               </button>
               <select
-                aria-label="切图生成模式"
+                aria-label={t("切图生成模式")}
                 className="generate-mode-select"
                 disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
                 onChange={(event) => setSliceGenerateMode(event.target.value as SliceGenerateMode)}
                 value={sliceGenerateMode}
               >
-                <option value="pending">仅未生成</option>
-                <option value="force">强制重新切图</option>
+                <option value="pending">{t("仅未生成")}</option>
+                <option value="force">{t("强制重新切图")}</option>
               </select>
             </div>
           </div>
@@ -1776,7 +1802,7 @@ function PagesView({
               <div className="asset-preview-toolbar">
 	                <button className="secondary-button compact" onClick={returnToSliceCanvas} type="button">
 	                  <ArrowLeft size={15} />
-	                  返回页面
+	                  {t("返回页面")}
 	                </button>
 	                <div className="asset-preview-meta">
 	                  <strong>{previewTitle}</strong>
@@ -1825,7 +1851,7 @@ function PagesView({
                           height: displayRect.height
                         }}
                         type="button"
-                        title={`${selection.name}，右键删除`}
+                        title={t("{name}，右键删除", { name: selection.name })}
                       >
                         {index + 1}
                       </button>
@@ -1843,7 +1869,7 @@ function PagesView({
                           openDeleteContextMenu(event, {
                             type: "annotation",
                             id: annotation.id,
-                            label: `批注 ${index + 1}`
+                            label: t("批注 {index}", { index: index + 1 })
                           });
                         }}
                         style={{
@@ -1855,7 +1881,7 @@ function PagesView({
                         title={annotation.note}
                         type="button"
                       >
-                        批注 {index + 1}
+                        {t("批注 {index}", { index: index + 1 })}
                       </button>
                     );
                   })
@@ -1887,40 +1913,40 @@ function PagesView({
                         note: event.target.value
                       })
                     }
-                    placeholder="添加批注..."
+                    placeholder={t("添加批注...")}
                     autoFocus
                   />
                   <button className="primary-button compact" onClick={submitAnnotation} type="button">
-                    添加
+                    {t("添加")}
                   </button>
                   <button
                     className="secondary-button compact"
                     onClick={() => setAnnotationPopover(null)}
                     type="button"
                   >
-                    取消
+                    {t("取消")}
                   </button>
                 </div>
               ) : null}
             </div>
           ) : (
-            <div className="empty-state">暂无界面图片</div>
+            <div className="empty-state">{t("暂无界面图片")}</div>
           )}
         </div>
 
         <div className="asset-strip">
           {sliceSelections.length === 0 ? (
-            <span>暂无切图区域</span>
+            <span>{t("暂无切图区域")}</span>
           ) : (
             <>
               <div className="slice-selection-tools">
-                <span>已选 {checkedSliceSelections.length}</span>
+                <span>{t("已选 {count}", { count: checkedSliceSelections.length })}</span>
                 <button
                   className="secondary-button compact"
                   onClick={() => setCheckedSliceSelectionIds(sliceSelections.map((selection) => selection.id))}
                   type="button"
                 >
-                  全选
+                  {t("全选")}
                 </button>
                 <button
                   className="secondary-button compact"
@@ -1928,7 +1954,7 @@ function PagesView({
                   onClick={() => setCheckedSliceSelectionIds([])}
                   type="button"
                 >
-                  清空
+                  {t("清空")}
                 </button>
               </div>
               {sliceSelections.map((selection, index) => {
@@ -1952,7 +1978,7 @@ function PagesView({
                     ref={selectedSelectionId === selection.id ? selectedSliceItemRef : undefined}
                   >
                     <input
-                      aria-label={`选择 ${selection.name}`}
+                      aria-label={t("选择 {name}", { name: selection.name })}
                       checked={checkedSliceSelectionIdSet.has(selection.id)}
                       className="slice-selection-checkbox"
                       onChange={(event) => toggleCheckedSliceSelection(selection.id, event.target.checked)}
@@ -1971,9 +1997,9 @@ function PagesView({
                         )
                       }
                       onBlur={(event) => updateSliceSelection(selection.id, { name: event.target.value })}
-                      aria-label="切图名称"
+                      aria-label={t("切图名称")}
                     />
-                    <span>{linkedAsset ? linkedAsset.id : formatSelectionStatus(selection.status)}</span>
+                    <span>{linkedAsset ? linkedAsset.id : formatSelectionStatus(selection.status, t)}</span>
                     <button
                       className="secondary-button compact slice-preview-button"
                       disabled={!linkedAsset}
@@ -1984,11 +2010,11 @@ function PagesView({
                           void previewSliceAsset(linkedAsset);
                         }
                       }}
-                      title={linkedAsset ? "查看切图素材" : "素材生成后可查看"}
+                      title={linkedAsset ? t("查看切图素材") : t("素材生成后可查看")}
                       type="button"
                     >
                       <Eye size={14} />
-                      查看
+                      {t("查看")}
                     </button>
                     <button
                       className="icon-button compact"
@@ -2002,7 +2028,7 @@ function PagesView({
                           label: selection.name
                         });
                       }}
-                      title="删除切图区域"
+                      title={t("删除切图区域")}
                       type="button"
                     >
                       <X size={14} />
@@ -2017,9 +2043,9 @@ function PagesView({
         {selectedSliceSelection ? (
           <div className="slice-selection-editor">
             <label>
-              <span>素材描述</span>
+              <span>{t("素材描述")}</span>
               <div className="slice-description-readonly">
-                {selectedSliceSelection.prompt.trim() || "生成素材后由 Codex 根据参考图和框选位置自动填写"}
+                {selectedSliceSelection.prompt.trim() || t("生成素材后由 Codex 根据参考图和框选位置自动填写")}
               </div>
             </label>
           </div>
@@ -2038,7 +2064,7 @@ function PagesView({
 	          <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="输入界面风格"
+            placeholder={t("输入界面风格")}
           />
           <button
             className="primary-button send-button"
@@ -2046,7 +2072,7 @@ function PagesView({
             disabled={!selectedPage || Boolean(activeImageTask)}
           >
             <Send size={18} />
-	            {activeImageTask ? "处理中" : "生成图片"}
+	            {activeImageTask ? t("处理中") : t("生成图片")}
 	          </button>
 	        </div>
         {contextMenu ? (
@@ -2057,11 +2083,11 @@ function PagesView({
           >
             {contextMenu.type === "slice" ? (
               <>
-                <span>切图区域：{contextMenu.label}</span>
+                <span>{t("切图区域：{label}", { label: contextMenu.label })}</span>
                 <textarea
                   value={singleSliceNote}
                   onChange={(event) => setSingleSliceNote(event.target.value)}
-                  placeholder="本次单独切图备注，例如：补上左侧阴影、不要包含背景、多切了右侧按钮..."
+                  placeholder={t("本次单独切图备注，例如：补上左侧阴影、不要包含背景、多切了右侧按钮...")}
                   rows={3}
                   autoFocus
                 />
@@ -2072,10 +2098,10 @@ function PagesView({
                     onClick={() => generateSingleSlice(contextMenu.id, singleSliceNote)}
                     type="button"
                   >
-                    单独切图
+                    {t("单独切图")}
                   </button>
                   <button className="danger-button compact" onClick={confirmContextDelete} type="button">
-                    删除区域
+                    {t("删除区域")}
                   </button>
                   <button
                     className="secondary-button compact"
@@ -2085,18 +2111,18 @@ function PagesView({
                     }}
                     type="button"
                   >
-                    取消
+                    {t("取消")}
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <span>删除 {contextMenu.label}？</span>
+                <span>{t("删除 {label}？", { label: contextMenu.label })}</span>
                 <button className="danger-button compact" onClick={confirmContextDelete} type="button">
-                  删除
+                  {t("删除")}
                 </button>
                 <button className="secondary-button compact" onClick={() => setContextMenu(null)} type="button">
-                  取消
+                  {t("取消")}
                 </button>
               </>
             )}
@@ -2116,6 +2142,7 @@ function SettingsDialog({
   onError: (message: string) => void;
   onNotice: (message: string) => void;
 }) {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [codexArgs, setCodexArgs] = useState("");
 
@@ -2141,7 +2168,7 @@ function SettingsDialog({
           args: splitLines(codexArgs)
         }
       });
-      onNotice("设置已保存");
+      onNotice(t("设置已保存"));
       onClose();
     } catch (err) {
       onError(toErrorMessage(err));
@@ -2151,11 +2178,11 @@ function SettingsDialog({
   const timeoutMinutes = settings ? Math.max(1, Math.round(settings.codex.timeoutMs / 60_000)) : 30;
 
   return (
-    <Dialog title="设置" onClose={onClose}>
+    <Dialog title={t("设置")} onClose={onClose}>
       {settings ? (
         <>
           <label className="field">
-            <span>Codex 命令</span>
+            <span>{t("Codex 命令")}</span>
             <input
               value={settings.codex.command}
               onChange={(event) =>
@@ -2167,11 +2194,11 @@ function SettingsDialog({
             />
           </label>
           <label className="field">
-            <span>Codex 参数</span>
+            <span>{t("Codex 参数")}</span>
             <textarea value={codexArgs} onChange={(event) => setCodexArgs(event.target.value)} />
           </label>
           <label className="field">
-            <span>Codex 超时分钟数</span>
+            <span>{t("Codex 超时分钟数")}</span>
             <input
               min={1}
               type="number"
@@ -2195,16 +2222,16 @@ function SettingsDialog({
           </label>
           <div className="dialog-actions">
             <button className="secondary-button" onClick={onClose}>
-              取消
+              {t("取消")}
             </button>
             <button className="primary-button" onClick={save}>
               <Check size={16} />
-              保存
+              {t("保存")}
             </button>
           </div>
         </>
       ) : (
-        <div className="empty-state compact">加载中</div>
+        <div className="empty-state compact">{t("加载中")}</div>
       )}
     </Dialog>
   );
@@ -2219,12 +2246,14 @@ function Dialog({
   children: ReactNode;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="modal-backdrop" role="presentation">
       <div className="modal" role="dialog" aria-modal="true">
         <div className="modal-header">
           <h2>{title}</h2>
-          <button className="icon-button" onClick={onClose} title="关闭">
+          <button className="icon-button" onClick={onClose} title={t("关闭")}>
             <X size={18} />
           </button>
         </div>
@@ -2306,7 +2335,51 @@ function formatElapsed(ms: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function createInitialProjectPrompt(projectType: ProjectType): string {
+function createInitialProjectPrompt(projectType: ProjectType, locale: Locale): string {
+  if (locale === "de") {
+    if (projectType === "app") {
+      return [
+        "Dies ist ein APP-Projekt. Bitte erstelle die Produktplanung nach Standards für mobile Anwendungen.",
+        "",
+        "Generiere PRD, Funktionsplanung, technische Planung, Styleguide, Seitenplanung, Funktionsliste und zusätzlich eine Animationsliste.",
+        "Die Animationsliste soll Seitenübergänge, Komponentenfeedback, Gesteninteraktionen, Lade-/Leer-/Fehlerzustandsanimationen, wichtige Workflow-Animationen und Implementierungshinweise abdecken.",
+        "",
+        "Projektanforderung:"
+      ].join("\n");
+    }
+
+    return [
+      "Dies ist ein WEB-Projekt. Bitte erstelle die Produktplanung nach Web/H5-Standards.",
+      "",
+      "Generiere PRD, Funktionsplanung, technische Planung, Styleguide, Seitenplanung und Funktionsliste.",
+      "Die Seitenplanung soll Routen, Seitenverantwortlichkeiten, Kerninteraktionen, Zustände und UI-Beschreibungen für spätere Bildgenerierung enthalten.",
+      "",
+      "Projektanforderung:"
+    ].join("\n");
+  }
+
+  if (locale === "en") {
+    if (projectType === "app") {
+      return [
+        "This is an APP project. Please complete product planning using mobile application standards.",
+        "",
+        "Generate PRD, feature plan, technical plan, style guide, page plan, feature list, and an animation list.",
+        "The animation list should cover page transitions, component feedback, gesture interactions, loading/empty/error state animation, key workflow motion, and implementation notes.",
+        "",
+        "Project requirement:"
+      ].join("\n");
+    }
+
+    return [
+      "This is a WEB project. Please complete product planning using Web/H5 application standards.",
+      "",
+      "Generate PRD, feature plan, technical plan, style guide, page plan, and feature list.",
+      "The page plan should specify routes, page responsibilities, core interactions, states, and UI descriptions for later image generation.",
+      "",
+      "Project requirement:"
+    ].join("\n");
+  }
+
   if (projectType === "app") {
     return [
       "这是一个 APP 项目，请按移动端应用标准完成产品规划。",
@@ -2328,31 +2401,36 @@ function createInitialProjectPrompt(projectType: ProjectType): string {
   ].join("\n");
 }
 
-function formatSelectionStatus(status: SliceSelectionMeta["status"]): string {
+function formatSelectionStatus(status: SliceSelectionMeta["status"], t: (source: string) => string): string {
   switch (status) {
     case "generated":
-      return "已生成";
+      return t("已生成");
     case "failed":
-      return "失败";
+      return t("失败");
     case "pending":
-      return "待生成";
+      return t("待生成");
   }
 }
 
-function formatImageAnnotationPrompt(annotation: PageImageAnnotation): string {
+function formatImageAnnotationPrompt(annotation: PageImageAnnotation, t: (source: string, values?: Record<string, string | number>) => string): string {
   const rect = annotation.selection;
 
   return [
-    `针对参考图片 ${annotation.sourceImagePath} 的批注：`,
-    `批注 ID：${annotation.id}`,
-    `区域：x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}`,
+    t("针对参考图片 {path} 的批注：", { path: annotation.sourceImagePath }),
+    t("批注 ID：{id}", { id: annotation.id }),
+    t("区域：x={x}, y={y}, width={width}, height={height}", {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height
+    }),
     annotation.note
   ].join("\n");
 }
 
 function removeImageAnnotationPrompt(value: string, annotationId: string): string {
   const pattern = new RegExp(
-    `(^|\\n\\n)针对参考图片 [\\s\\S]*?批注 ID：${escapeRegExp(annotationId)}[\\s\\S]*?(?=\\n\\n针对参考图片 |$)`,
+    `(^|\\n\\n)(?:针对参考图片|Annotation for reference image|Kommentar zum Referenzbild) [\\s\\S]*?(?:批注 ID：|Annotation ID: |Kommentar-ID: )${escapeRegExp(annotationId)}[\\s\\S]*?(?=\\n\\n(?:针对参考图片|Annotation for reference image|Kommentar zum Referenzbild) |$)`,
     "u"
   );
 
@@ -2366,23 +2444,25 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function formatStreamLevel(level: AiStreamEvent["level"]): string {
+function formatStreamLevel(level: AiStreamEvent["level"], t: (source: string) => string): string {
   switch (level) {
     case "status":
-      return "状态";
+      return t("状态");
     case "stdout":
-      return "输出";
+      return t("输出");
     case "stderr":
-      return "日志";
+      return t("日志");
     case "complete":
-      return "完成";
+      return t("完成");
     case "error":
-      return "错误";
+      return t("错误");
   }
 }
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
+function formatDate(value: string, locale: Locale): string {
+  const dateLocale = locale === "zh-CN" ? "zh-CN" : locale === "de" ? "de-DE" : "en-US";
+
+  return new Intl.DateTimeFormat(dateLocale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

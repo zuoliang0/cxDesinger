@@ -1026,6 +1026,14 @@ select {
   padding: 0 9px;
 }
 
+.language-picker {
+  width: 72px;
+  height: 36px;
+  border-radius: 6px;
+  color: var(--text);
+  background: #ffffff;
+}
+
 textarea:focus,
 input:focus,
 select:focus {
