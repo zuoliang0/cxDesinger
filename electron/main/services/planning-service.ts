@@ -14,6 +14,9 @@ const DOCUMENTS: Array<{ type: DocumentMeta["type"]; title: string; fileName: st
   { type: "page-plan", title: "页面规划", fileName: "page-plan.md" },
   { type: "feature-list", title: "功能清单", fileName: "feature-list.md" }
 ];
+const APP_ONLY_DOCUMENTS: Array<{ type: DocumentMeta["type"]; title: string; fileName: string }> = [
+  { type: "animation-list", title: "动效清单", fileName: "animation-list.md" }
+];
 
 export class PlanningService {
   constructor(
@@ -32,7 +35,13 @@ export class PlanningService {
       throw new Error("需求描述不能为空");
     }
 
-    const output = await this.codexTextProvider.runPlanning(projectRoot, trimmedRequirement, streamOptions);
+    const current = await this.projectService.readPagesJson(projectRoot);
+    const output = await this.codexTextProvider.runPlanning(
+      projectRoot,
+      trimmedRequirement,
+      current.project.type || "web",
+      streamOptions
+    );
     return this.applyPlanningOutput(projectRoot, output);
   }
 
@@ -47,6 +56,13 @@ export class PlanningService {
     await this.writeDocument(docsDir, "feature-plan.md", output.documents.featurePlan);
     await this.writeDocument(docsDir, "technical-plan.md", output.documents.technicalPlan);
     await this.writeDocument(docsDir, "style.md", output.documents.styleGuide);
+    if (current.project.type === "app") {
+      await this.writeDocument(
+        docsDir,
+        "animation-list.md",
+        output.documents.animationList || this.createFallbackAnimationList(current.project.name)
+      );
+    }
     await this.writeDocument(docsDir, "page-plan.md", output.documents.pagePlan);
     await this.writeDocument(docsDir, "feature-list.md", output.documents.featureList);
 
@@ -77,7 +93,7 @@ export class PlanningService {
         ...current.project,
         updatedAt: timestamp
       },
-      documents: DOCUMENTS.map((doc) => ({
+      documents: this.getDocumentsForProject(current.project.type || "web").map((doc) => ({
         type: doc.type,
         title: doc.title,
         path: `docs/${doc.fileName}`,
@@ -90,6 +106,38 @@ export class PlanningService {
     await this.projectService.touchIndex(projectRoot, next);
 
     return { rootDir: projectRoot, meta: next };
+  }
+
+  private getDocumentsForProject(projectType: "web" | "app") {
+    if (projectType === "app") {
+      return [
+        ...DOCUMENTS.slice(0, 5),
+        ...APP_ONLY_DOCUMENTS,
+        ...DOCUMENTS.slice(5)
+      ];
+    }
+
+    return DOCUMENTS;
+  }
+
+  private createFallbackAnimationList(projectName: string): string {
+    return [
+      "# 动效清单",
+      "",
+      `项目：${projectName}`,
+      "",
+      "## 页面转场",
+      "",
+      "- 待根据页面规划补充进入、返回、弹层和关键流程转场。",
+      "",
+      "## 组件动效",
+      "",
+      "- 待补充按钮反馈、加载状态、列表滚动、手势反馈和错误状态动效。",
+      "",
+      "## 开发注意事项",
+      "",
+      "- 动效需保持可取消、性能稳定，并避免影响核心操作效率。"
+    ].join("\n");
   }
 
   private async writeDocument(docsDir: string, fileName: string, content: string): Promise<void> {

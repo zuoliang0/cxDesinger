@@ -12,6 +12,7 @@ export const pagesJsonSchema = z.object({
   project: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
+    type: z.enum(["web", "app"]).optional(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1)
   }),
@@ -23,6 +24,7 @@ export const pagesJsonSchema = z.object({
         "feature-plan",
         "technical-plan",
         "style-guide",
+        "animation-list",
         "page-plan",
         "feature-list"
       ]),
@@ -83,6 +85,7 @@ export const planningOutputSchema = z.object({
     featurePlan: z.string().min(1),
     technicalPlan: z.string().min(1),
     styleGuide: z.string().min(1),
+    animationList: z.string().min(1).optional(),
     pagePlan: z.string().min(1),
     featureList: z.string().min(1)
   }),

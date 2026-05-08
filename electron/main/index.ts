@@ -3,6 +3,8 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import type {
   AppSettings,
+  CloseCodeTerminalInput,
+  CreateCodeTerminalInput,
   ExportProjectInput,
   GeneratePageBackgroundInput,
   GenerateSliceAssetsInput,
@@ -12,20 +14,26 @@ import type {
   ListPageImageVersionsInput,
   ReadAssetInput,
   ReadDocumentInput,
+  ReadProjectFileInput,
+  ResizeCodeTerminalInput,
   ReviseDocumentInput,
   RunPlanningInput,
   SaveSliceSelectionsInput,
   SetActivePageImageVersionInput,
-  SyncPagePlanInput
+  SyncPagePlanInput,
+  WriteCodeTerminalInput,
+  WriteProjectFileInput
 } from "../../src/shared/types";
 import { selectionRectSchema } from "../../src/shared/validation";
 import { ensureInsideProject, getMimeType } from "./utils/fs";
 import { CodexImageProvider } from "./services/codex-image-provider";
 import { CodexTextProvider } from "./services/codex-text-provider";
+import { CodeTerminalService } from "./services/code-terminal-service";
 import { DocumentRevisionService } from "./services/document-revision-service";
 import { ImageService } from "./services/image-service";
 import { PagePlanSyncService } from "./services/page-plan-sync-service";
 import { PlanningService } from "./services/planning-service";
+import { ProjectFileService } from "./services/project-file-service";
 import { ProjectService } from "./services/project-service";
 import { SettingsService } from "./services/settings-service";
 import { ZipService } from "./services/zip-service";
@@ -34,6 +42,7 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 let mainWindow: BrowserWindow | null = null;
 const taskControllers = new Map<string, AbortController>();
+const codeTerminalService = new CodeTerminalService();
 
 function beginTask(taskId: string | undefined): AbortSignal | undefined {
   if (!taskId) {
@@ -89,7 +98,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 980,
     minHeight: 680,
-    title: "AI Product Designer",
+    title: "cxDesinger",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -109,6 +118,7 @@ function registerIpc(): void {
   const userDataDir = app.getPath("userData");
   const settingsService = new SettingsService(userDataDir);
   const projectService = new ProjectService(userDataDir);
+  const projectFileService = new ProjectFileService();
   const zipService = new ZipService();
 
   ipcMain.handle("projects:list", () => projectService.listProjects());
@@ -118,6 +128,15 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog({
       title: "选择项目根目录",
       properties: ["openDirectory", "createDirectory"]
+    });
+
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle("projects:selectExistingDirectory", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "打开已有项目文件夹",
+      properties: ["openDirectory"]
     });
 
     return result.canceled ? null : result.filePaths[0];
@@ -375,6 +394,39 @@ function registerIpc(): void {
     return fs.readFile(filePath, "utf8");
   });
 
+  ipcMain.handle("project:listFiles", (_event, input: { projectRoot: string }) =>
+    projectFileService.listProjectFiles(input.projectRoot)
+  );
+
+  ipcMain.handle("project:readFile", (_event, input: ReadProjectFileInput) =>
+    projectFileService.readProjectFile(input.projectRoot, input.relativePath)
+  );
+
+  ipcMain.handle("project:writeFile", (_event, input: WriteProjectFileInput) =>
+    projectFileService.writeProjectFile(input)
+  );
+
+  ipcMain.handle("codeTerminal:create", async (event, input: CreateCodeTerminalInput) => {
+    const settings = await settingsService.getSettings();
+    await codeTerminalService.createTerminal(input, settings, event.sender);
+  });
+
+  ipcMain.handle("codeTerminal:write", (_event, input: WriteCodeTerminalInput) => {
+    codeTerminalService.writeTerminal(input);
+  });
+
+  ipcMain.handle("codeTerminal:resize", (_event, input: ResizeCodeTerminalInput) => {
+    codeTerminalService.resizeTerminal(input);
+  });
+
+  ipcMain.handle("codeTerminal:close", (_event, input: CloseCodeTerminalInput) => {
+    codeTerminalService.closeTerminal(input.terminalId);
+  });
+
+  ipcMain.on("codeTerminal:closeForWebContents", (event) => {
+    codeTerminalService.closeWebContentsTerminals(event.sender.id);
+  });
+
   ipcMain.handle("settings:get", () => settingsService.getSettings());
   ipcMain.handle("settings:save", (_event, settings: AppSettings) =>
     settingsService.saveSettings(settings)
@@ -390,6 +442,10 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+app.on("before-quit", () => {
+  codeTerminalService.closeAll();
 });
 
 app.on("window-all-closed", () => {

@@ -67,14 +67,15 @@ export class ImageService {
       outputPath
     }, streamOptions);
     await this.writePageImageAnnotations(outputPath, annotations);
+    const latest = await this.projectService.readPagesJson(projectRoot);
     const timestamp = nowIso();
-    const pages = current.pages.map((item) =>
+    const pages = latest.pages.map((item) =>
       item.id === page.id ? this.withClearedUpdateFlag(item, finalPrompt, imagePath) : item
     );
     const next = {
-      ...current,
+      ...latest,
       project: {
-        ...current.project,
+        ...latest.project,
         updatedAt: timestamp
       },
       pages
@@ -144,14 +145,15 @@ export class ImageService {
       sourceImagePath: page.imagePath,
       outputPath
     }, streamOptions);
+    const latest = await this.projectService.readPagesJson(projectRoot);
     const timestamp = nowIso();
     const next = {
-      ...current,
+      ...latest,
       project: {
-        ...current.project,
+        ...latest.project,
         updatedAt: timestamp
       },
-      pages: current.pages.map((item) =>
+      pages: latest.pages.map((item) =>
         item.id === page.id
           ? {
               ...item,
@@ -188,8 +190,9 @@ export class ImageService {
       page,
       sourceImagePath: page.imagePath
     }, streamOptions);
+    const latest = await this.projectService.readPagesJson(projectRoot);
     const timestamp = nowIso();
-    const existingSelections = current.sliceSelections || [];
+    const existingSelections = latest.sliceSelections || [];
     const generatedSelections = existingSelections.filter(
       (selection) => selection.pageId === pageId && selection.status === "generated"
     );
@@ -211,9 +214,9 @@ export class ImageService {
       }))
     ];
     const next = {
-      ...current,
+      ...latest,
       project: {
-        ...current.project,
+        ...latest.project,
         updatedAt: timestamp
       },
       sliceSelections: nextSelections
@@ -372,11 +375,11 @@ export class ImageService {
       (selection) =>
         selection.pageId === pageId &&
         requestedIds.has(selection.id) &&
-        (options.force || selection.status !== "generated")
+        (options.force || selection.status === "pending")
     );
     let assets = [...current.assets];
     let pageAssetIds = [...page.assetIds];
-    const nextSelections = selections.map((selection) => ({ ...selection }));
+    let nextSelections = selections.map((selection) => ({ ...selection }));
     const instruction = options.prompt?.trim();
     const batchItems = targetSelections.map((selection) => {
       const assetId = makeId("asset");
@@ -402,6 +405,13 @@ export class ImageService {
         const generatedBySelectionId = new Map(
           generatedAssets.map((asset) => [asset.selectionId, asset])
         );
+        const latest = await this.projectService.readPagesJson(projectRoot);
+        const latestPage = latest.pages.find((item) => item.id === pageId) || page;
+        const latestSelections = latest.sliceSelections || [];
+
+        assets = [...latest.assets];
+        pageAssetIds = [...latestPage.assetIds];
+        nextSelections = latestSelections.map((selection) => ({ ...selection }));
 
         for (const item of batchItems) {
           const generated = generatedBySelectionId.get(item.sliceSelection.id);
@@ -411,9 +421,12 @@ export class ImageService {
           }
 
           const index = nextSelections.findIndex((selection) => selection.id === item.sliceSelection.id);
+          const latestSelection = latestSelections.find((selection) => selection.id === item.sliceSelection.id);
           const assetName = generated.name.trim() || item.sliceSelection.name;
           const assetDescription = generated.description.trim();
-          const replacedAssetId = options.replaceExisting ? item.sliceSelection.assetId : null;
+          const replacedAssetId = options.replaceExisting
+            ? latestSelection?.assetId || item.sliceSelection.assetId
+            : null;
 
           if (replacedAssetId) {
             assets = assets.filter((asset) => asset.id !== replacedAssetId);

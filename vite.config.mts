@@ -15,7 +15,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    exclude: ["node_modules/**", "dist-renderer/**", "dist-electron/**"],
+    exclude: ["node_modules/**", "dist-renderer/**", "dist-electron/**", "release/**"],
     setupFiles: ["src/renderer/test-setup.ts"]
   }
 });

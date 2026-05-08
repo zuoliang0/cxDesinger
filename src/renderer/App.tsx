@@ -5,6 +5,8 @@ import {
   Archive,
   Boxes,
   Check,
+  Code2,
+  CircleAlert,
   Download,
   Eye,
   FileText,
@@ -29,24 +31,29 @@ import type {
   DocumentMeta,
   PageImageAnnotation,
   PageImageVersion,
+  ProjectType,
   ProjectIndexEntry,
   ProjectInfo,
   SelectionRect,
   SliceSelectionMeta
 } from "../shared/types";
 import { formatDocumentComment } from "./comment-format";
+import { CodeWorkspace } from "./CodeWorkspace";
 import { createDemoApi } from "./demo-api";
 import { MarkdownDocument } from "./MarkdownDocument";
 import { selectionToNatural } from "./selection";
 import { getCurrentTaskLabel } from "./task-status";
 
-type Screen = "home" | "planning" | "pages";
+type Screen = "home" | "planning" | "pages" | "code";
 type ActiveCodexTask = {
   id: string;
   label: string;
   startedAt: number;
   scope: AiStreamEvent["scope"];
+  pageId?: string;
 };
+type ImageTaskResult = "success" | "error";
+type SliceGenerateMode = "pending" | "force";
 type PageAssetPreview =
   | { kind: "slice"; assetId: string; dataUrl: string }
   | { kind: "background"; path: string; dataUrl: string };
@@ -62,9 +69,10 @@ export function App() {
   const [busyText, setBusyText] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [imageTask, setImageTask] = useState<ActiveCodexTask | null>(null);
-  const [imageStreamEvents, setImageStreamEvents] = useState<AiStreamEvent[]>([]);
-  const imageTaskIdRef = useRef("");
+  const [imageTasks, setImageTasks] = useState<Record<string, ActiveCodexTask>>({});
+  const [imageTaskResultsByPage, setImageTaskResultsByPage] = useState<Record<string, ImageTaskResult>>({});
+  const [imageStreamEventsByPage, setImageStreamEventsByPage] = useState<Record<string, AiStreamEvent[]>>({});
+  const imageTaskPageByIdRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     if (!api) {
@@ -76,61 +84,102 @@ export function App() {
 
   useEffect(() => {
     const unsubscribe = api.onAiStreamEvent((event) => {
-      if (event.taskId !== imageTaskIdRef.current || event.scope !== "image") {
+      if (event.scope !== "image") {
         return;
       }
 
-      setImageStreamEvents((current) => [...current, event].slice(-120));
+      const pageId = imageTaskPageByIdRef.current[event.taskId];
+
+      if (!pageId) {
+        return;
+      }
+
+      setImageStreamEventsByPage((current) => ({
+        ...current,
+        [pageId]: [...(current[pageId] || []), event].slice(-120)
+      }));
     });
 
     return unsubscribe;
   }, []);
 
-  function startImageTask(id: string, label: string) {
-    imageTaskIdRef.current = id;
-    setImageStreamEvents([]);
-    setImageTask({ id, label, scope: "image", startedAt: Date.now() });
+  function startImageTask(pageId: string, id: string, label: string) {
+    imageTaskPageByIdRef.current = {
+      ...imageTaskPageByIdRef.current,
+      [id]: pageId
+    };
+    setImageStreamEventsByPage((current) => ({
+      ...current,
+      [pageId]: []
+    }));
+    setImageTaskResultsByPage((current) => {
+      const next = { ...current };
+      delete next[pageId];
+      return next;
+    });
+    setImageTasks((current) => ({
+      ...current,
+      [pageId]: { id, label, pageId, scope: "image", startedAt: Date.now() }
+    }));
   }
 
-  function finishImageTask(id: string) {
-    setImageTask((current) => {
-      if (current?.id !== id) {
+  function finishImageTask(pageId: string, id: string, result: ImageTaskResult) {
+    setImageTasks((current) => {
+      const task = current[pageId];
+
+      if (task?.id !== id) {
         return current;
       }
 
-      setImageStreamEvents((events) => [
+      setImageStreamEventsByPage((events) => ({
         ...events,
-        {
-          taskId: id,
-          scope: "image",
-          level: "complete",
-          message: `任务结束，耗时 ${formatElapsed(Date.now() - current.startedAt)}`,
-          createdAt: new Date().toISOString()
-        }
-      ]);
-      return null;
+        [pageId]: [
+          ...(events[pageId] || []),
+          {
+            taskId: id,
+            scope: "image",
+            level: "complete",
+            message: `任务结束，耗时 ${formatElapsed(Date.now() - task.startedAt)}`,
+            createdAt: new Date().toISOString()
+          }
+        ]
+      }));
+
+      const next = { ...current };
+      delete next[pageId];
+      return next;
     });
-    if (imageTaskIdRef.current === id) {
-      imageTaskIdRef.current = "";
-    }
+    setImageTaskResultsByPage((current) => ({
+      ...current,
+      [pageId]: result
+    }));
+
+    const nextTaskPageById = { ...imageTaskPageByIdRef.current };
+    delete nextTaskPageById[id];
+    imageTaskPageByIdRef.current = nextTaskPageById;
   }
 
-  async function cancelActiveImageTask() {
-    if (!imageTask) {
+  async function cancelImageTask(pageId: string) {
+    const task = imageTasks[pageId];
+
+    if (!task) {
       return;
     }
 
-    await api.cancelTask(imageTask.id);
-    setImageStreamEvents((current) => [
+    await api.cancelTask(task.id);
+    setImageStreamEventsByPage((current) => ({
       ...current,
-      {
-        taskId: imageTask.id,
-        scope: "image",
-        level: "error",
-        message: "已请求停止当前 Codex 调用",
-        createdAt: new Date().toISOString()
-      }
-    ]);
+      [pageId]: [
+        ...(current[pageId] || []),
+        {
+          taskId: task.id,
+          scope: "image",
+          level: "error",
+          message: "已请求停止当前页面的 Codex 调用",
+          createdAt: new Date().toISOString()
+        }
+      ]
+    }));
   }
 
   async function refreshProjects() {
@@ -149,6 +198,21 @@ export function App() {
       setError(toErrorMessage(err));
     } finally {
       setBusyText("");
+    }
+  }
+
+  async function chooseAndOpenProject() {
+    setError("");
+
+    try {
+      const selected = await api.selectExistingProjectDirectory();
+
+      if (selected) {
+        await openProject(selected);
+        await refreshProjects();
+      }
+    } catch (err) {
+      setError(toErrorMessage(err));
     }
   }
 
@@ -176,7 +240,7 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <Boxes size={20} />
-          <span>AI Product Designer</span>
+          <span>cxDesinger</span>
         </div>
         {project ? (
           <div className="project-context">
@@ -200,6 +264,13 @@ export function App() {
               >
                 <Layers size={16} />
                 页面管理
+              </button>
+              <button
+                className={screen === "code" ? "toolbar-button active" : "toolbar-button"}
+                onClick={() => setScreen("code")}
+              >
+                <Code2 size={16} />
+                代码编写
               </button>
               <button className="icon-button" onClick={exportProject} title="导出项目">
                 <Download size={18} />
@@ -251,6 +322,7 @@ export function App() {
           <HomeView
             projects={projects}
             onNewProject={() => setNewProjectOpen(true)}
+            onChooseProject={chooseAndOpenProject}
             onOpenProject={openProject}
           />
         ) : null}
@@ -267,12 +339,30 @@ export function App() {
             onProjectChange={setProject}
             onError={setError}
             onNotice={setNotice}
-            imageTask={imageTask}
-            imageStreamEvents={imageStreamEvents}
+            imageTasks={imageTasks}
+            imageTaskResultsByPage={imageTaskResultsByPage}
+            imageStreamEventsByPage={imageStreamEventsByPage}
             onImageTaskStart={startImageTask}
             onImageTaskFinish={finishImageTask}
-            onCancelImageTask={cancelActiveImageTask}
+            onClearImageTaskResult={(pageId) =>
+              setImageTaskResultsByPage((current) => {
+                const next = { ...current };
+                delete next[pageId];
+                return next;
+              })
+            }
+            onCancelImageTask={cancelImageTask}
           />
+        ) : null}
+        {project ? (
+          <div className={screen === "code" ? "workspace-view active" : "workspace-view hidden"}>
+            <CodeWorkspace
+              active={screen === "code"}
+              project={project}
+              onError={setError}
+              onNotice={setNotice}
+            />
+          </div>
         ) : null}
       </main>
 
@@ -304,10 +394,12 @@ export function App() {
 function HomeView({
   projects,
   onNewProject,
+  onChooseProject,
   onOpenProject
 }: {
   projects: ProjectIndexEntry[];
   onNewProject: () => void;
+  onChooseProject: () => void;
   onOpenProject: (rootDir: string) => void;
 }) {
   return (
@@ -317,10 +409,16 @@ function HomeView({
           <h1>项目</h1>
           <span>{projects.length} 个项目</span>
         </div>
-        <button className="primary-button" onClick={onNewProject}>
-          <Plus size={18} />
-          新建项目
-        </button>
+        <div className="section-actions">
+          <button className="secondary-button" onClick={onChooseProject}>
+            <FolderOpen size={18} />
+            打开项目
+          </button>
+          <button className="primary-button" onClick={onNewProject}>
+            <Plus size={18} />
+            新建项目
+          </button>
+        </div>
       </div>
 
       <div className="project-list">
@@ -355,6 +453,7 @@ function NewProjectDialog({
 }) {
   const [name, setName] = useState("");
   const [rootDir, setRootDir] = useState("");
+  const [projectType, setProjectType] = useState<ProjectType>("web");
 
   async function chooseDirectory() {
     const selected = await api.selectProjectDirectory();
@@ -368,7 +467,7 @@ function NewProjectDialog({
     onError("");
 
     try {
-      const created = await api.createProject({ name, rootDir });
+      const created = await api.createProject({ name, rootDir, type: projectType });
       onCreated(created);
     } catch (err) {
       onError(toErrorMessage(err));
@@ -392,6 +491,13 @@ function NewProjectDialog({
           </button>
         </div>
       </label>
+      <label className="field">
+        <span>项目类型</span>
+        <select value={projectType} onChange={(event) => setProjectType(event.target.value as ProjectType)}>
+          <option value="web">WEB</option>
+          <option value="app">APP</option>
+        </select>
+      </label>
       <div className="dialog-actions">
         <button className="secondary-button" onClick={onClose}>
           取消
@@ -414,7 +520,11 @@ function PlanningView({
   onProjectChange: (project: ProjectInfo) => void;
   onError: (message: string) => void;
 }) {
-  const [requirement, setRequirement] = useState("");
+  const [requirement, setRequirement] = useState(() =>
+    project.meta.documents.length === 0
+      ? createInitialProjectPrompt(project.meta.project.type || "web")
+      : ""
+  );
   const [selectedModel, setSelectedModel] = useState<CodexModel>("gpt-5.5");
   const [selectedDoc, setSelectedDoc] = useState<DocumentMeta | null>(project.meta.documents[0] || null);
   const [docContent, setDocContent] = useState("");
@@ -724,6 +834,51 @@ function TaskStatus({
   );
 }
 
+function PageTaskIndicator({
+  running,
+  result,
+  onClear
+}: {
+  running: boolean;
+  result?: ImageTaskResult;
+  onClear: () => void;
+}) {
+  if (running) {
+    return (
+      <span className="page-task-indicator running" title="正在处理后台任务">
+        <Loader2 className="spin" size={14} />
+      </span>
+    );
+  }
+
+  if (result === "success") {
+    return (
+      <span
+        className="page-task-indicator success"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClear();
+        }}
+        role="button"
+        tabIndex={0}
+        title="任务完成，点击清除"
+      >
+        <Check size={14} />
+      </span>
+    );
+  }
+
+  if (result === "error") {
+    return (
+      <span className="page-task-indicator error" title="任务失败">
+        <CircleAlert size={14} />
+      </span>
+    );
+  }
+
+  return <span className="page-task-indicator empty" />;
+}
+
 function AiStreamPanel({
   events,
   endRef,
@@ -762,21 +917,25 @@ function PagesView({
   onProjectChange,
   onError,
   onNotice,
-  imageTask: activeImageTask,
-  imageStreamEvents,
+  imageTasks,
+  imageTaskResultsByPage,
+  imageStreamEventsByPage,
   onImageTaskStart,
   onImageTaskFinish,
+  onClearImageTaskResult,
   onCancelImageTask
 }: {
   project: ProjectInfo;
   onProjectChange: (project: ProjectInfo) => void;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
-  imageTask: ActiveCodexTask | null;
-  imageStreamEvents: AiStreamEvent[];
-  onImageTaskStart: (id: string, label: string) => void;
-  onImageTaskFinish: (id: string) => void;
-  onCancelImageTask: () => void;
+  imageTasks: Record<string, ActiveCodexTask>;
+  imageTaskResultsByPage: Record<string, ImageTaskResult>;
+  imageStreamEventsByPage: Record<string, AiStreamEvent[]>;
+  onImageTaskStart: (pageId: string, id: string, label: string) => void;
+  onImageTaskFinish: (pageId: string, id: string, result: ImageTaskResult) => void;
+  onClearImageTaskResult: (pageId: string) => void;
+  onCancelImageTask: (pageId: string) => void;
 }) {
   const [selectedPageId, setSelectedPageId] = useState(project.meta.pages[0]?.id || "");
   const selectedPage = useMemo(
@@ -789,6 +948,8 @@ function PagesView({
   const [imageVersions, setImageVersions] = useState<PageImageVersion[]>([]);
   const [sliceSelections, setSliceSelections] = useState<SliceSelectionMeta[]>([]);
   const [selectedSelectionId, setSelectedSelectionId] = useState("");
+  const [checkedSliceSelectionIds, setCheckedSliceSelectionIds] = useState<string[]>([]);
+  const [sliceGenerateMode, setSliceGenerateMode] = useState<SliceGenerateMode>("pending");
   const [selectionMode, setSelectionMode] = useState(false);
   const [annotationMode, setAnnotationMode] = useState(false);
   const [pageAnnotations, setPageAnnotations] = useState<PageImageAnnotation[]>([]);
@@ -819,7 +980,7 @@ function PagesView({
 
   useEffect(() => {
     imageStreamEndRef.current?.scrollIntoView({ block: "end" });
-  }, [imageStreamEvents]);
+  }, [selectedPage?.id, selectedPage ? imageStreamEventsByPage[selectedPage.id]?.length : 0]);
 
   useEffect(() => {
     selectedSliceItemRef.current?.scrollIntoView({
@@ -866,6 +1027,7 @@ function PagesView({
     setAnnotationPopover(null);
     setPageAnnotations([]);
     setAssetPreview(null);
+    setCheckedSliceSelectionIds([]);
   }, [selectedPage?.id, selectedPage?.uiPrompt]);
 
   useEffect(() => {
@@ -874,6 +1036,9 @@ function PagesView({
     );
 
     setSliceSelections(selections);
+    setCheckedSliceSelectionIds((current) =>
+      current.filter((selectionId) => selections.some((selection) => selection.id === selectionId))
+    );
     setSelectedSelectionId((current) =>
       current && selections.some((selection) => selection.id === current) ? current : selections[0]?.id || ""
     );
@@ -917,8 +1082,9 @@ function PagesView({
     }
 
     const taskId = createTaskId();
+    let taskResult: ImageTaskResult = "success";
 
-    onImageTaskStart(taskId, "正在生成当前页面图片");
+    onImageTaskStart(selectedPage.id, taskId, "正在生成当前页面图片");
     setAssetPreview(null);
     onError("");
 
@@ -938,9 +1104,10 @@ function PagesView({
       setAnnotationMode(false);
       onNotice("界面图片已生成");
     } catch (err) {
+      taskResult = "error";
       onError(toErrorMessage(err));
     } finally {
-      onImageTaskFinish(taskId);
+      onImageTaskFinish(selectedPage.id, taskId, taskResult);
     }
   }
 
@@ -950,9 +1117,10 @@ function PagesView({
     }
 
     const taskId = createTaskId();
+    let taskResult: ImageTaskResult = "success";
 
     setAssetPreview(null);
-    onImageTaskStart(taskId, "正在提取页面背景");
+    onImageTaskStart(selectedPage.id, taskId, "正在提取页面背景");
     onError("");
 
     try {
@@ -966,28 +1134,39 @@ function PagesView({
       onProjectChange(updated);
       onNotice("页面背景已提取并写入 pages.json");
     } catch (err) {
+      taskResult = "error";
       onError(toErrorMessage(err));
     } finally {
-      onImageTaskFinish(taskId);
+      onImageTaskFinish(selectedPage.id, taskId, taskResult);
     }
   }
 
-  async function generateSlice() {
+  async function generateSlice(mode: SliceGenerateMode = sliceGenerateMode) {
     if (!selectedPage?.imagePath || activeImageTask) {
       return;
     }
 
-    const pendingSelectionIds = sliceSelections
-      .filter((selection) => selection.status !== "generated")
+    const checkedSelectionIdSet = new Set(checkedSliceSelectionIds);
+    const candidateSelections =
+      checkedSelectionIdSet.size > 0
+        ? sliceSelections.filter((selection) => checkedSelectionIdSet.has(selection.id))
+        : sliceSelections;
+    const targetSelectionIds = candidateSelections
+      .filter((selection) => mode === "force" || selection.status === "pending")
       .map((selection) => selection.id);
 
-    if (pendingSelectionIds.length === 0) {
+    if (targetSelectionIds.length === 0) {
       return;
     }
 
     const taskId = createTaskId();
+    let taskResult: ImageTaskResult = "success";
 
-    onImageTaskStart(taskId, "正在生成切图素材");
+    onImageTaskStart(
+      selectedPage.id,
+      taskId,
+      mode === "force" ? "正在强制重新生成切图素材" : "正在生成切图素材"
+    );
     setAssetPreview(null);
     onError("");
 
@@ -996,18 +1175,21 @@ function PagesView({
         taskId,
         projectRoot: project.rootDir,
         pageId: selectedPage.id,
-        selectionIds: pendingSelectionIds,
+        selectionIds: targetSelectionIds,
+        force: mode === "force",
+        replaceExisting: mode === "force",
         model: "gpt-5.5",
         reasoningEffort: "high"
       });
       onProjectChange(batchUpdated);
       setDragSelection(null);
       setSelectionMode(false);
-      onNotice("切图生成已完成");
+      onNotice(mode === "force" ? "切图已强制重新生成" : "切图生成已完成");
     } catch (err) {
+      taskResult = "error";
       onError(toErrorMessage(err));
     } finally {
-      onImageTaskFinish(taskId);
+      onImageTaskFinish(selectedPage.id, taskId, taskResult);
     }
   }
 
@@ -1017,12 +1199,13 @@ function PagesView({
     }
 
     const taskId = createTaskId();
+    let taskResult: ImageTaskResult = "success";
 
     setAssetPreview(null);
     setSelectionMode(false);
     setAnnotationMode(false);
     setAnnotationPopover(null);
-    onImageTaskStart(taskId, "正在识别切图区域");
+    onImageTaskStart(selectedPage.id, taskId, "正在识别切图区域");
     onError("");
 
     try {
@@ -1036,9 +1219,10 @@ function PagesView({
       onProjectChange(updated);
       onNotice("切图区域已识别，可确认后生成全部切图");
     } catch (err) {
+      taskResult = "error";
       onError(toErrorMessage(err));
     } finally {
-      onImageTaskFinish(taskId);
+      onImageTaskFinish(selectedPage.id, taskId, taskResult);
     }
   }
 
@@ -1048,8 +1232,9 @@ function PagesView({
     }
 
     const taskId = createTaskId();
+    let taskResult: ImageTaskResult = "success";
 
-    onImageTaskStart(taskId, "正在单独生成切图素材");
+    onImageTaskStart(selectedPage.id, taskId, "正在单独生成切图素材");
     setAssetPreview(null);
     onError("");
 
@@ -1071,9 +1256,10 @@ function PagesView({
       setSingleSliceNote("");
       onNotice("单独切图已完成");
     } catch (err) {
+      taskResult = "error";
       onError(toErrorMessage(err));
     } finally {
-      onImageTaskFinish(taskId);
+      onImageTaskFinish(selectedPage.id, taskId, taskResult);
     }
   }
 
@@ -1222,7 +1408,25 @@ function PagesView({
   const pageAssets = selectedPage
     ? project.meta.assets.filter((asset) => asset.pageId === selectedPage.id)
     : [];
-  const pendingSliceSelections = sliceSelections.filter((selection) => selection.status !== "generated");
+  const activeImageTask = selectedPage ? imageTasks[selectedPage.id] || null : null;
+  const imageStreamEvents = selectedPage ? imageStreamEventsByPage[selectedPage.id] || [] : [];
+  const checkedSliceSelectionIdSet = useMemo(
+    () => new Set(checkedSliceSelectionIds),
+    [checkedSliceSelectionIds]
+  );
+  const checkedSliceSelections = sliceSelections.filter((selection) =>
+    checkedSliceSelectionIdSet.has(selection.id)
+  );
+  const sliceGenerateCandidates =
+    checkedSliceSelections.length > 0 ? checkedSliceSelections : sliceSelections;
+  const pendingSliceSelections = sliceGenerateCandidates.filter(
+    (selection) => selection.status === "pending"
+  );
+  const forcedSliceSelections = sliceGenerateCandidates;
+  const activeSliceGenerateCount =
+    sliceGenerateMode === "force" ? forcedSliceSelections.length : pendingSliceSelections.length;
+  const sliceGenerateTargetText =
+    checkedSliceSelections.length > 0 ? `已选 ${checkedSliceSelections.length}` : "全部区域";
   const activeVersion = imageVersions.find((version) => version.active);
   const selectedSliceSelection = sliceSelections.find((selection) => selection.id === selectedSelectionId);
   const selectedPreviewAsset = assetPreview?.kind === "slice"
@@ -1266,6 +1470,14 @@ function PagesView({
     );
 
     await saveSelections(nextSelections);
+  }
+
+  function toggleCheckedSliceSelection(selectionId: string, checked: boolean) {
+    setCheckedSliceSelectionIds((current) =>
+      checked
+        ? Array.from(new Set([...current, selectionId]))
+        : current.filter((item) => item !== selectionId)
+    );
   }
 
   async function previewSliceAsset(asset: AssetMeta) {
@@ -1394,16 +1606,30 @@ function PagesView({
           {project.meta.pages.length === 0 ? (
             <div className="empty-state compact">暂无页面</div>
           ) : (
-            project.meta.pages.map((page) => (
-              <button
-                className={selectedPage?.id === page.id ? "nav-row active" : "nav-row"}
-                key={page.id}
-                onClick={() => setSelectedPageId(page.id)}
-              >
-                <span>{page.name}</span>
-                <small>{page.route}</small>
-              </button>
-            ))
+            project.meta.pages.map((page) => {
+              const pageTask = imageTasks[page.id];
+              const pageTaskResult = imageTaskResultsByPage[page.id];
+
+              return (
+                <button
+                  className={
+                    selectedPage?.id === page.id ? "nav-row page-nav-row active" : "nav-row page-nav-row"
+                  }
+                  key={page.id}
+                  onClick={() => setSelectedPageId(page.id)}
+                >
+                  <span className="page-nav-text">
+                    <span>{page.name}</span>
+                    <small>{page.route}</small>
+                  </span>
+                  <PageTaskIndicator
+                    running={Boolean(pageTask)}
+                    result={pageTaskResult}
+                    onClear={() => onClearImageTaskResult(page.id)}
+                  />
+                </button>
+              );
+            })
           )}
         </div>
       </aside>
@@ -1492,19 +1718,32 @@ function PagesView({
               <Sparkles size={16} />
               AI识别切图
             </button>
-            <button
-              className="primary-button"
-              onClick={generateSlice}
-              disabled={
-                pendingSliceSelections.length === 0 ||
-                !selectedPage?.imagePath ||
-                Boolean(activeImageTask) ||
-                Boolean(assetPreview)
-              }
-            >
-              <Image size={16} />
-              生成全部切图
-            </button>
+            <div className="split-generate-control" title={`${sliceGenerateTargetText}，本次 ${activeSliceGenerateCount} 个`}>
+              <button
+                className="primary-button"
+                onClick={() => generateSlice(sliceGenerateMode)}
+                disabled={
+                  activeSliceGenerateCount === 0 ||
+                  !selectedPage?.imagePath ||
+                  Boolean(activeImageTask) ||
+                  Boolean(assetPreview)
+                }
+                type="button"
+              >
+                <Image size={16} />
+                生成切图
+              </button>
+              <select
+                aria-label="切图生成模式"
+                className="generate-mode-select"
+                disabled={!selectedPage?.imagePath || Boolean(activeImageTask) || Boolean(assetPreview)}
+                onChange={(event) => setSliceGenerateMode(event.target.value as SliceGenerateMode)}
+                value={sliceGenerateMode}
+              >
+                <option value="pending">仅未生成</option>
+                <option value="force">强制重新切图</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1673,77 +1912,105 @@ function PagesView({
           {sliceSelections.length === 0 ? (
             <span>暂无切图区域</span>
           ) : (
-            sliceSelections.map((selection, index) => {
-              const linkedAsset = pageAssets.find((asset) => asset.id === selection.assetId);
-              return (
-                <div
-                  className={
-                    selectedSelectionId === selection.id
-                      ? "slice-selection-item active"
-                      : "slice-selection-item"
-                  }
-                  key={selection.id}
-                  onClick={() => {
-                    setSelectedSelectionId(selection.id);
-                    if (linkedAsset) {
-                      void previewSliceAsset(linkedAsset);
-                    } else {
-                      setAssetPreview(null);
-                    }
-                  }}
-                  ref={selectedSelectionId === selection.id ? selectedSliceItemRef : undefined}
+            <>
+              <div className="slice-selection-tools">
+                <span>已选 {checkedSliceSelections.length}</span>
+                <button
+                  className="secondary-button compact"
+                  onClick={() => setCheckedSliceSelectionIds(sliceSelections.map((selection) => selection.id))}
+                  type="button"
                 >
-                  <strong>{index + 1}</strong>
-                  <input
-                    value={selection.name}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) =>
-                      setSliceSelections((current) =>
-                        current.map((item) =>
-                          item.id === selection.id ? { ...item, name: event.target.value } : item
-                        )
-                      )
+                  全选
+                </button>
+                <button
+                  className="secondary-button compact"
+                  disabled={checkedSliceSelections.length === 0}
+                  onClick={() => setCheckedSliceSelectionIds([])}
+                  type="button"
+                >
+                  清空
+                </button>
+              </div>
+              {sliceSelections.map((selection, index) => {
+                const linkedAsset = pageAssets.find((asset) => asset.id === selection.assetId);
+                return (
+                  <div
+                    className={
+                      selectedSelectionId === selection.id
+                        ? "slice-selection-item active"
+                        : "slice-selection-item"
                     }
-                    onBlur={(event) => updateSliceSelection(selection.id, { name: event.target.value })}
-                    aria-label="切图名称"
-                  />
-                  <span>{linkedAsset ? linkedAsset.id : formatSelectionStatus(selection.status)}</span>
-                  <button
-                    className="secondary-button compact slice-preview-button"
-                    disabled={!linkedAsset}
-                    onClick={(event) => {
-                      event.stopPropagation();
+                    key={selection.id}
+                    onClick={() => {
+                      setSelectedSelectionId(selection.id);
                       if (linkedAsset) {
-                        setSelectedSelectionId(selection.id);
                         void previewSliceAsset(linkedAsset);
+                      } else {
+                        setAssetPreview(null);
                       }
                     }}
-                    title={linkedAsset ? "查看切图素材" : "素材生成后可查看"}
-                    type="button"
+                    ref={selectedSelectionId === selection.id ? selectedSliceItemRef : undefined}
                   >
-                    <Eye size={14} />
-                    查看
-                  </button>
-                  <button
-                    className="icon-button compact"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setContextMenu({
-                        x: event.clientX,
-                        y: event.clientY,
-                        type: "slice",
-                        id: selection.id,
-                        label: selection.name
-                      });
-                    }}
-                    title="删除切图区域"
-                    type="button"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              );
-            })
+                    <input
+                      aria-label={`选择 ${selection.name}`}
+                      checked={checkedSliceSelectionIdSet.has(selection.id)}
+                      className="slice-selection-checkbox"
+                      onChange={(event) => toggleCheckedSliceSelection(selection.id, event.target.checked)}
+                      onClick={(event) => event.stopPropagation()}
+                      type="checkbox"
+                    />
+                    <strong>{index + 1}</strong>
+                    <input
+                      value={selection.name}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) =>
+                        setSliceSelections((current) =>
+                          current.map((item) =>
+                            item.id === selection.id ? { ...item, name: event.target.value } : item
+                          )
+                        )
+                      }
+                      onBlur={(event) => updateSliceSelection(selection.id, { name: event.target.value })}
+                      aria-label="切图名称"
+                    />
+                    <span>{linkedAsset ? linkedAsset.id : formatSelectionStatus(selection.status)}</span>
+                    <button
+                      className="secondary-button compact slice-preview-button"
+                      disabled={!linkedAsset}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (linkedAsset) {
+                          setSelectedSelectionId(selection.id);
+                          void previewSliceAsset(linkedAsset);
+                        }
+                      }}
+                      title={linkedAsset ? "查看切图素材" : "素材生成后可查看"}
+                      type="button"
+                    >
+                      <Eye size={14} />
+                      查看
+                    </button>
+                    <button
+                      className="icon-button compact"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setContextMenu({
+                          x: event.clientX,
+                          y: event.clientY,
+                          type: "slice",
+                          id: selection.id,
+                          label: selection.name
+                        });
+                      }}
+                      title="删除切图区域"
+                      type="button"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+            </>
           )}
         </div>
 
@@ -1760,7 +2027,7 @@ function PagesView({
 
         <div className="image-task-area">
           {activeImageTask ? (
-            <TaskStatus task={activeImageTask} onCancel={onCancelImageTask} />
+            <TaskStatus task={activeImageTask} onCancel={() => onCancelImageTask(activeImageTask.pageId || selectedPage?.id || "")} />
           ) : null}
           {imageStreamEvents.length > 0 ? (
             <AiStreamPanel events={imageStreamEvents} endRef={imageStreamEndRef} compact />
@@ -2037,6 +2304,28 @@ function formatElapsed(ms: number): string {
   const seconds = totalSeconds % 60;
 
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function createInitialProjectPrompt(projectType: ProjectType): string {
+  if (projectType === "app") {
+    return [
+      "这是一个 APP 项目，请按移动端应用标准完成产品规划。",
+      "",
+      "请生成 PRD、功能规划、技术方案、视觉规范、页面规划、功能清单，并额外生成动效清单。",
+      "动效清单需要覆盖页面转场、组件反馈、手势交互、加载/空/错误状态动画、关键业务流程动效和开发实现注意事项。",
+      "",
+      "项目需求："
+    ].join("\n");
+  }
+
+  return [
+    "这是一个 WEB 项目，请按 Web/H5 应用标准完成产品规划。",
+    "",
+    "请生成 PRD、功能规划、技术方案、视觉规范、页面规划和功能清单。",
+    "页面规划需要明确路由、页面职责、核心交互、状态和后续生成 UI 图片所需的界面描述。",
+    "",
+    "项目需求："
+  ].join("\n");
 }
 
 function formatSelectionStatus(status: SliceSelectionMeta["status"]): string {

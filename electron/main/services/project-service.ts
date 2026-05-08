@@ -40,11 +40,13 @@ export class ProjectService {
     await this.ensureEmptyProjectRoot(rootDir);
 
     const timestamp = nowIso();
+    const projectType = input.type || "web";
     const meta: PagesJson = {
       schemaVersion: 1,
       project: {
         id: makeId("project"),
         name,
+        type: projectType,
         createdAt: timestamp,
         updatedAt: timestamp
       },

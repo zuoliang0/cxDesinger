@@ -33,6 +33,7 @@ const PLANNING_OUTPUT_JSON_SCHEMA = {
         featurePlan: { type: "string", minLength: 1 },
         technicalPlan: { type: "string", minLength: 1 },
         styleGuide: { type: "string", minLength: 1 },
+        animationList: { type: "string", minLength: 1 },
         pagePlan: { type: "string", minLength: 1 },
         featureList: { type: "string", minLength: 1 }
       }
@@ -112,6 +113,7 @@ export class CodexTextProvider {
   async runPlanning(
     projectRoot: string,
     requirement: string,
+    projectType: "web" | "app" = "web",
     streamOptions: CodexStreamOptions = {}
   ): Promise<PlanningOutput> {
     const schemaPath = path.join(os.tmpdir(), `planning-output-${randomUUID()}.schema.json`);
@@ -153,7 +155,7 @@ export class CodexTextProvider {
       const result = await runProcess({
         command: this.options.command,
         args,
-        stdin: this.createPlanningPrompt(requirement),
+        stdin: this.createPlanningPrompt(requirement, projectType),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
         onStdout: (chunk) => this.emitStream(streamOptions, "stdout", chunk),
@@ -388,13 +390,17 @@ export class CodexTextProvider {
     return path.basename(this.options.command).toLowerCase() === "codex";
   }
 
-  private createPlanningPrompt(requirement: string): string {
+  private createPlanningPrompt(requirement: string, projectType: "web" | "app"): string {
     return [
       "你是一个资深产品经理、UI 信息架构师和技术方案设计师。",
       "请基于用户需求生成结构化项目规划，最终只返回符合 JSON Schema 的 JSON。",
+      `项目类型：${projectType === "app" ? "APP" : "WEB"}`,
       "需要覆盖：沟通记录、PRD、功能规划、技术方案、全局视觉风格规范、页面规划、功能清单。",
       "documents.styleGuide 将写入 docs/style.md，作为后续所有页面图片生成的统一视觉规范。",
       "styleGuide 必须明确：目标用户与情绪、画幅与布局密度、色彩系统、字体层级、组件形态、图标/插画风格、动效/状态表达、禁用风格和跨页面一致性规则。",
+      projectType === "app"
+        ? "这是 APP 项目，documents.animationList 必须生成并写入 docs/animation-list.md，内容要覆盖页面转场、组件动效、手势反馈、加载/空/错误状态动画、关键业务流程动效和开发实现注意事项。"
+        : "这是 WEB 项目，除非用户明确要求，不需要输出 animationList。",
       "pages 数组必须可直接写入 pages.json，每个页面包含 name、route、description、uiPrompt。",
       "uiPrompt 用于后续生成界面 UI 图片，必须具体描述布局、层级、关键组件和状态；视觉风格要引用 styleGuide 的统一规则，避免每个页面各写一套冲突风格。",
       "",

@@ -11,9 +11,12 @@ export interface ProjectInfo {
   meta: PagesJson;
 }
 
+export type ProjectType = "web" | "app";
+
 export interface ProjectMeta {
   id: string;
   name: string;
+  type?: ProjectType;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +27,7 @@ export type DocumentType =
   | "feature-plan"
   | "technical-plan"
   | "style-guide"
+  | "animation-list"
   | "page-plan"
   | "feature-list";
 
@@ -104,6 +108,7 @@ export interface PlanningOutput {
     featurePlan: string;
     technicalPlan: string;
     styleGuide: string;
+    animationList?: string;
     pagePlan: string;
     featureList: string;
   };
@@ -147,6 +152,7 @@ export interface AppSettings {
 export interface CreateProjectInput {
   name: string;
   rootDir: string;
+  type?: ProjectType;
 }
 
 export interface RunPlanningInput {
@@ -279,4 +285,76 @@ export interface ReadDocumentInput {
 
 export interface ExportProjectResult {
   zipPath: string;
+}
+
+export interface ProjectFileNode {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  editable?: boolean;
+  size?: number;
+  mtimeMs?: number;
+  children?: ProjectFileNode[];
+}
+
+export interface ListProjectFilesInput {
+  projectRoot: string;
+}
+
+export interface ReadProjectFileInput {
+  projectRoot: string;
+  relativePath: string;
+}
+
+export interface ReadProjectFileResult {
+  path: string;
+  content: string;
+  mtimeMs: number;
+  size: number;
+}
+
+export interface WriteProjectFileInput {
+  projectRoot: string;
+  relativePath: string;
+  content: string;
+  expectedMtimeMs?: number;
+}
+
+export interface WriteProjectFileResult {
+  path: string;
+  mtimeMs: number;
+  size: number;
+}
+
+export interface CreateCodeTerminalInput {
+  projectRoot: string;
+  terminalId: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface WriteCodeTerminalInput {
+  terminalId: string;
+  data: string;
+}
+
+export interface ResizeCodeTerminalInput {
+  terminalId: string;
+  cols: number;
+  rows: number;
+}
+
+export interface CloseCodeTerminalInput {
+  terminalId: string;
+}
+
+export interface CodeTerminalDataEvent {
+  terminalId: string;
+  data: string;
+}
+
+export interface CodeTerminalExitEvent {
+  terminalId: string;
+  exitCode?: number;
+  signal?: number;
 }

@@ -140,6 +140,77 @@ describe("ImageService", () => {
     );
   });
 
+  it("only batch-generates pending selections unless force is enabled", async () => {
+    const { rootDir, projectService } = await createProjectWithPage();
+    const imageProvider = createFakeImageProvider();
+    const service = new ImageService(projectService, imageProvider);
+    const withImage = await service.generatePageImage(rootDir, "page_home", "新的界面提示");
+    const timestamp = new Date().toISOString();
+    await service.saveSliceSelections(rootDir, "page_home", [
+      {
+        id: "selection_pending",
+        pageId: "page_home",
+        name: "待生成按钮",
+        sourceImagePath: withImage.meta.pages[0].imagePath || "",
+        selection: { x: 10, y: 10, width: 20, height: 20 },
+        prompt: "",
+        status: "pending",
+        assetId: null,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      },
+      {
+        id: "selection_generated",
+        pageId: "page_home",
+        name: "已生成按钮",
+        sourceImagePath: withImage.meta.pages[0].imagePath || "",
+        selection: { x: 40, y: 40, width: 30, height: 30 },
+        prompt: "",
+        status: "generated",
+        assetId: "asset_existing",
+        createdAt: timestamp,
+        updatedAt: timestamp
+      },
+      {
+        id: "selection_failed",
+        pageId: "page_home",
+        name: "失败按钮",
+        sourceImagePath: withImage.meta.pages[0].imagePath || "",
+        selection: { x: 80, y: 80, width: 30, height: 30 },
+        prompt: "",
+        status: "failed",
+        assetId: null,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }
+    ]);
+
+    const updated = await service.generateSliceAssets(rootDir, "page_home", [
+      "selection_pending",
+      "selection_generated",
+      "selection_failed"
+    ]);
+
+    expect(imageProvider.sliceBatchCalls).toBe(1);
+    expect(updated.meta.assets).toHaveLength(1);
+    expect(updated.meta.assets[0].selectionId).toBe("selection_pending");
+    expect(updated.meta.sliceSelections?.find((item) => item.id === "selection_pending")?.status).toBe("generated");
+    expect(updated.meta.sliceSelections?.find((item) => item.id === "selection_generated")?.assetId).toBe(
+      "asset_existing"
+    );
+    expect(updated.meta.sliceSelections?.find((item) => item.id === "selection_failed")?.status).toBe("failed");
+
+    const forced = await service.generateSliceAssets(
+      rootDir,
+      "page_home",
+      ["selection_failed"],
+      {},
+      { force: true, replaceExisting: true, prompt: "单独重试失败区域" }
+    );
+    expect(imageProvider.sliceBatchCalls).toBe(2);
+    expect(forced.meta.sliceSelections?.find((item) => item.id === "selection_failed")?.status).toBe("generated");
+  });
+
   it("extracts a page background and stores it on the page meta", async () => {
     const { rootDir, projectService } = await createProjectWithPage();
     const imageProvider = createFakeImageProvider();

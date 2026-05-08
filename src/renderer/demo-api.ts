@@ -1,8 +1,18 @@
 import type { ElectronApi } from "../shared/api";
-import type { AiStreamEvent, AiStreamLevel, AiStreamScope, AppSettings, ProjectInfo } from "../shared/types";
+import type {
+  AiStreamEvent,
+  AiStreamLevel,
+  AiStreamScope,
+  AppSettings,
+  CodeTerminalDataEvent,
+  CodeTerminalExitEvent,
+  ProjectInfo
+} from "../shared/types";
 
 const now = new Date().toISOString();
 const streamListeners = new Set<(event: AiStreamEvent) => void>();
+const terminalDataListeners = new Set<(event: CodeTerminalDataEvent) => void>();
+const terminalExitListeners = new Set<(event: CodeTerminalExitEvent) => void>();
 const demoPageVersions = new Map<string, string[]>();
 const demoDocuments: Record<string, string> = {
   "docs/prd.md": "# PRD\n\n这是浏览器预览模式下的示例文档内容。",
@@ -11,12 +21,13 @@ const demoDocuments: Record<string, string> = {
 };
 
 let demoProject: ProjectInfo = {
-  rootDir: "/Users/demo/AI Product Demo",
+  rootDir: "Demo/AI Product Demo",
   meta: {
     schemaVersion: 1,
     project: {
       id: "project_demo",
       name: "AI 产品设计示例",
+      type: "web",
       createdAt: now,
       updatedAt: now
     },
@@ -73,7 +84,8 @@ export function createDemoApi(): ElectronApi {
         updatedAt: demoProject.meta.project.updatedAt
       }
     ],
-    selectProjectDirectory: async () => "/Users/demo/New AI Project",
+    selectProjectDirectory: async () => "Demo/New AI Project",
+    selectExistingProjectDirectory: async () => demoProject.rootDir,
     createProject: async (input) => {
       const timestamp = new Date().toISOString();
       for (const key of Object.keys(demoDocuments)) {
@@ -86,6 +98,7 @@ export function createDemoApi(): ElectronApi {
           project: {
             id: `project_${Date.now()}`,
             name: input.name || "未命名项目",
+            type: input.type || "web",
             createdAt: timestamp,
             updatedAt: timestamp
           },
@@ -106,6 +119,9 @@ export function createDemoApi(): ElectronApi {
       demoDocuments["docs/feature-plan.md"] = "# 功能规划\n\n- 新建项目\n- AI 规划";
       demoDocuments["docs/technical-plan.md"] = "# 技术方案\n\nElectron + React。";
       demoDocuments["docs/style.md"] = "# 视觉规范\n\n统一使用清晰、克制、儿童友好的视觉语言。";
+      if (demoProject.meta.project.type === "app") {
+        demoDocuments["docs/animation-list.md"] = "# 动效清单\n\n- 页面转场\n- 手势反馈\n- 加载与错误状态动效";
+      }
       demoDocuments["docs/page-plan.md"] = "# 页面规划\n\n首页和页面管理。";
       demoDocuments["docs/feature-list.md"] = "# 功能清单\n\n- 项目列表\n- 切图";
       demoProject = {
@@ -122,6 +138,9 @@ export function createDemoApi(): ElectronApi {
             { type: "feature-plan", title: "功能规划", path: "docs/feature-plan.md", updatedAt: timestamp },
             { type: "technical-plan", title: "技术方案", path: "docs/technical-plan.md", updatedAt: timestamp },
             { type: "style-guide", title: "视觉规范", path: "docs/style.md", updatedAt: timestamp },
+            ...(demoProject.meta.project.type === "app"
+              ? [{ type: "animation-list" as const, title: "动效清单", path: "docs/animation-list.md", updatedAt: timestamp }]
+              : []),
             { type: "page-plan", title: "页面规划", path: "docs/page-plan.md", updatedAt: timestamp },
             { type: "feature-list", title: "功能清单", path: "docs/feature-list.md", updatedAt: timestamp }
           ],
@@ -446,7 +465,7 @@ export function createDemoApi(): ElectronApi {
       };
       return demoProject;
     },
-    exportProjectZip: async () => ({ zipPath: "/Users/demo/AI 产品设计示例.zip" }),
+    exportProjectZip: async () => ({ zipPath: "Demo/AI 产品设计示例.zip" }),
     readAssetAsDataUrl: async () =>
       `data:image/svg+xml;base64,${btoa(`
         <svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600">
@@ -462,6 +481,86 @@ export function createDemoApi(): ElectronApi {
       `)}`,
     readDocument: async (input) =>
       demoDocuments[input.relativePath] || `# ${input.relativePath}\n\n这是浏览器预览模式下的示例文档内容。`,
+    listProjectFiles: async () => [
+      {
+        name: "docs",
+        path: "docs",
+        type: "directory",
+        children: Object.keys(demoDocuments).map((path) => ({
+          name: path.split("/").at(-1) || path,
+          path,
+          type: "file",
+          editable: true,
+          size: demoDocuments[path].length,
+          mtimeMs: Date.now()
+        }))
+      },
+      {
+        name: "pages.json",
+        path: "pages.json",
+        type: "file",
+        editable: true,
+        size: JSON.stringify(demoProject.meta, null, 2).length,
+        mtimeMs: Date.now()
+      }
+    ],
+    readProjectFile: async (input) => {
+      const content =
+        input.relativePath === "pages.json"
+          ? JSON.stringify(demoProject.meta, null, 2)
+          : demoDocuments[input.relativePath] || "";
+      return {
+        path: input.relativePath,
+        content,
+        mtimeMs: Date.now(),
+        size: content.length
+      };
+    },
+    writeProjectFile: async (input) => {
+      if (input.relativePath === "pages.json") {
+        demoProject = {
+          ...demoProject,
+          meta: JSON.parse(input.content)
+        };
+      } else {
+        demoDocuments[input.relativePath] = input.content;
+      }
+
+      return {
+        path: input.relativePath,
+        mtimeMs: Date.now(),
+        size: input.content.length
+      };
+    },
+    createCodeTerminal: async (input) => {
+      queueMicrotask(() => {
+        for (const listener of terminalDataListeners) {
+          listener({
+            terminalId: input.terminalId,
+            data: `Codex demo terminal\r\ncwd: ${input.projectRoot}\r\n$ `
+          });
+        }
+      });
+    },
+    writeCodeTerminal: async (input) => {
+      for (const listener of terminalDataListeners) {
+        listener({ terminalId: input.terminalId, data: input.data });
+      }
+    },
+    resizeCodeTerminal: async () => undefined,
+    closeCodeTerminal: async (input) => {
+      for (const listener of terminalExitListeners) {
+        listener({ terminalId: input.terminalId, exitCode: 0 });
+      }
+    },
+    onCodeTerminalData: (listener) => {
+      terminalDataListeners.add(listener);
+      return () => terminalDataListeners.delete(listener);
+    },
+    onCodeTerminalExit: (listener) => {
+      terminalExitListeners.add(listener);
+      return () => terminalExitListeners.delete(listener);
+    },
     cancelTask: async () => true,
     onAiStreamEvent: (listener) => {
       streamListeners.add(listener);

@@ -1,6 +1,10 @@
 import type {
   AiStreamEvent,
   AppSettings,
+  CloseCodeTerminalInput,
+  CodeTerminalDataEvent,
+  CodeTerminalExitEvent,
+  CreateCodeTerminalInput,
   CreateProjectInput,
   ExportProjectInput,
   ExportProjectResult,
@@ -9,23 +13,32 @@ import type {
   GeneratePageImageInput,
   GenerateSliceAssetInput,
   IdentifySliceSelectionsInput,
+  ListProjectFilesInput,
   ListPageImageVersionsInput,
   PageImageVersion,
+  ProjectFileNode,
   ProjectIndexEntry,
   ProjectInfo,
   ReadAssetInput,
   ReadDocumentInput,
+  ReadProjectFileInput,
+  ReadProjectFileResult,
   ReviseDocumentInput,
   ReviseDocumentResult,
   RunPlanningInput,
   SaveSliceSelectionsInput,
   SetActivePageImageVersionInput,
-  SyncPagePlanInput
+  SyncPagePlanInput,
+  ResizeCodeTerminalInput,
+  WriteCodeTerminalInput,
+  WriteProjectFileInput,
+  WriteProjectFileResult
 } from "./types";
 
 export interface ElectronApi {
   listProjects: () => Promise<ProjectIndexEntry[]>;
   selectProjectDirectory: () => Promise<string | null>;
+  selectExistingProjectDirectory: () => Promise<string | null>;
   createProject: (input: CreateProjectInput) => Promise<ProjectInfo>;
   openProject: (rootDir: string) => Promise<ProjectInfo>;
   runPlanning: (input: RunPlanningInput) => Promise<ProjectInfo>;
@@ -42,6 +55,15 @@ export interface ElectronApi {
   exportProjectZip: (input: ExportProjectInput) => Promise<ExportProjectResult>;
   readAssetAsDataUrl: (input: ReadAssetInput) => Promise<string>;
   readDocument: (input: ReadDocumentInput) => Promise<string>;
+  listProjectFiles: (input: ListProjectFilesInput) => Promise<ProjectFileNode[]>;
+  readProjectFile: (input: ReadProjectFileInput) => Promise<ReadProjectFileResult>;
+  writeProjectFile: (input: WriteProjectFileInput) => Promise<WriteProjectFileResult>;
+  createCodeTerminal: (input: CreateCodeTerminalInput) => Promise<void>;
+  writeCodeTerminal: (input: WriteCodeTerminalInput) => Promise<void>;
+  resizeCodeTerminal: (input: ResizeCodeTerminalInput) => Promise<void>;
+  closeCodeTerminal: (input: CloseCodeTerminalInput) => Promise<void>;
+  onCodeTerminalData: (listener: (event: CodeTerminalDataEvent) => void) => () => void;
+  onCodeTerminalExit: (listener: (event: CodeTerminalExitEvent) => void) => () => void;
   cancelTask: (taskId: string) => Promise<boolean>;
   onAiStreamEvent: (listener: (event: AiStreamEvent) => void) => () => void;
   getSettings: () => Promise<AppSettings>;
