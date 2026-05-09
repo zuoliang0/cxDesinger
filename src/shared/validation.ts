@@ -85,7 +85,7 @@ export const planningOutputSchema = z.object({
     featurePlan: z.string().min(1),
     technicalPlan: z.string().min(1),
     styleGuide: z.string().min(1),
-    animationList: z.string().min(1).optional(),
+    animationList: z.string().optional(),
     pagePlan: z.string().min(1),
     featureList: z.string().min(1)
   }),

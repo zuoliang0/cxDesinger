@@ -27,13 +27,13 @@ const PLANNING_OUTPUT_JSON_SCHEMA = {
     documents: {
       type: "object",
       additionalProperties: false,
-      required: ["prd", "featurePlan", "technicalPlan", "styleGuide", "pagePlan", "featureList"],
+      required: ["prd", "featurePlan", "technicalPlan", "styleGuide", "animationList", "pagePlan", "featureList"],
       properties: {
         prd: { type: "string", minLength: 1 },
         featurePlan: { type: "string", minLength: 1 },
         technicalPlan: { type: "string", minLength: 1 },
         styleGuide: { type: "string", minLength: 1 },
-        animationList: { type: "string", minLength: 1 },
+        animationList: { type: "string" },
         pagePlan: { type: "string", minLength: 1 },
         featureList: { type: "string", minLength: 1 }
       }
@@ -400,7 +400,7 @@ export class CodexTextProvider {
       "styleGuide 必须明确：目标用户与情绪、画幅与布局密度、色彩系统、字体层级、组件形态、图标/插画风格、动效/状态表达、禁用风格和跨页面一致性规则。",
       projectType === "app"
         ? "这是 APP 项目，documents.animationList 必须生成并写入 docs/animation-list.md，内容要覆盖页面转场、组件动效、手势反馈、加载/空/错误状态动画、关键业务流程动效和开发实现注意事项。"
-        : "这是 WEB 项目，除非用户明确要求，不需要输出 animationList。",
+        : "这是 WEB 项目，documents.animationList 仍必须作为字段返回；除非用户明确要求动效清单，否则请返回空字符串。",
       "pages 数组必须可直接写入 pages.json，每个页面包含 name、route、description、uiPrompt。",
       "uiPrompt 用于后续生成界面 UI 图片，必须具体描述布局、层级、关键组件和状态；视觉风格要引用 styleGuide 的统一规则，避免每个页面各写一套冲突风格。",
       "",
@@ -433,13 +433,16 @@ export class CodexTextProvider {
       "请根据项目根目录下的页面规划文档和现有 pages.json，输出可写回 pages.json.pages 的完整页面数组。",
       "只返回符合 JSON Schema 的 JSON，不要输出 Markdown 或解释性文本。",
       "不要在提示词中依赖内嵌文档内容；请自行读取下面给出的相对路径文件。",
+      "必须读取 pages.json 的 project.type、project.name 和 docs/style.md（如果存在），并保持页面规划与当前项目类型、目标用户和视觉规范一致。",
       "需要保留语义稳定的页面 route；route 必须以 / 开头。",
       "每个页面必须包含 name、route、description、uiPrompt。",
-      "uiPrompt 用于生成界面图片，必须描述页面布局、关键组件、交互状态、视觉风格和面向儿童 Pad 横屏的适配要点。",
+      "uiPrompt 用于生成界面图片，必须描述页面布局、关键组件、交互状态、视觉风格、适配平台和响应式/设备适配要点。",
+      "不得引入与当前项目无关的领域设定、目标用户、设备类型或视觉风格。",
       "不要输出 imagePath、assetIds、needUpdate 或 assets；这些字段由主进程按现有 pages.json 合并。",
       "",
       `页面规划文档路径：${pagePlanPath}`,
-      "现有页面元信息路径：pages.json"
+      "现有页面元信息路径：pages.json",
+      "全局视觉规范路径：docs/style.md"
     ].join("\n");
   }
 
