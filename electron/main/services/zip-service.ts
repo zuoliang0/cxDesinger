@@ -1,5 +1,8 @@
 import fs from "node:fs";
+import path from "node:path";
 import archiver from "archiver";
+
+const EXPORT_ENTRIES = ["pages.json", "assets", "docs"] as const;
 
 export class ZipService {
   exportProject(projectRoot: string, zipPath: string): Promise<void> {
@@ -12,7 +15,20 @@ export class ZipService {
       archive.on("error", reject);
 
       archive.pipe(output);
-      archive.directory(projectRoot, false);
+      for (const entry of EXPORT_ENTRIES) {
+        const entryPath = path.join(projectRoot, entry);
+
+        if (!fs.existsSync(entryPath)) {
+          continue;
+        }
+
+        const stat = fs.statSync(entryPath);
+        if (stat.isDirectory()) {
+          archive.directory(entryPath, entry);
+        } else if (stat.isFile()) {
+          archive.file(entryPath, { name: entry });
+        }
+      }
       archive.finalize().catch(reject);
     });
   }
