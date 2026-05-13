@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
+import type { ClipboardEvent, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
 import {
   ArrowLeft,
   Boxes,
@@ -30,6 +30,7 @@ import type {
   DocumentMeta,
   PageImageAnnotation,
   PageImageVersion,
+  ReferenceImageMeta,
   ProjectType,
   ProjectIndexEntry,
   ProjectInfo,
@@ -542,6 +543,7 @@ function PlanningView({
       ? createInitialProjectPrompt(project.meta.project.type || "web", locale)
       : ""
   );
+  const [referenceImages, setReferenceImages] = useState<ReferenceImageMeta[]>([]);
   const [selectedModel, setSelectedModel] = useState<CodexModel>("gpt-5.5");
   const [selectedDoc, setSelectedDoc] = useState<DocumentMeta | null>(project.meta.documents[0] || null);
   const [docContent, setDocContent] = useState("");
@@ -554,6 +556,35 @@ function PlanningView({
   const [streamEvents, setStreamEvents] = useState<AiStreamEvent[]>([]);
   const activeTaskIdRef = useRef("");
   const streamEndRef = useRef<HTMLDivElement | null>(null);
+
+  async function addReferenceImageFiles(files: File[]) {
+    if (activeTask) {
+      return;
+    }
+
+    try {
+      const saved = await saveReferenceImageFiles(project.rootDir, files);
+      if (saved.length === 0) {
+        return;
+      }
+
+      setReferenceImages((current) => [...current, ...saved]);
+      onError("");
+    } catch (error) {
+      onError(toErrorMessage(error));
+    }
+  }
+
+  function handleReferenceImagePaste(event: ClipboardEvent<HTMLElement>) {
+    const files = getClipboardImageFiles(event);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    void addReferenceImageFiles(files);
+  }
 
   useEffect(() => {
     setSelectedDoc((current) => {
@@ -633,21 +664,25 @@ function PlanningView({
           projectRoot: project.rootDir,
           documentPath: selectedDoc.path,
           instruction,
+          referenceImagePaths: referenceImages.map((image) => image.path),
           model: selectedModel,
           reasoningEffort: "high"
         });
 
         setDocContent(result.content);
         onProjectChange(result.project);
+        setReferenceImages([]);
       } else {
         const updated = await api.runPlanning({
           taskId,
           projectRoot: project.rootDir,
           requirement: instruction,
+          referenceImagePaths: referenceImages.map((image) => image.path),
           model: selectedModel,
           reasoningEffort: "high"
         });
         onProjectChange(updated);
+        setReferenceImages([]);
       }
     } catch (err) {
       onError(toErrorMessage(err));
@@ -794,7 +829,14 @@ function PlanningView({
             <TaskStatus task={activeTask} onCancel={cancelActiveTask} />
           ) : null}
           {streamEvents.length > 0 ? <AiStreamPanel events={streamEvents} endRef={streamEndRef} /> : null}
-          <div className="prompt-bar planning-prompt-bar">
+          <div className="prompt-composer" onPaste={handleReferenceImagePaste}>
+            <ReferenceImagePicker
+              images={referenceImages}
+              disabled={Boolean(activeTask)}
+              onAddFiles={addReferenceImageFiles}
+              onChange={setReferenceImages}
+            />
+            <div className="prompt-bar planning-prompt-bar">
             <textarea
               value={requirement}
               onChange={(event) => setRequirement(event.target.value)}
@@ -821,6 +863,7 @@ function PlanningView({
               <Send size={18} />
               {activeTask ? t("处理中") : t("发送")}
             </button>
+            </div>
           </div>
         </div>
       </section>
@@ -848,6 +891,70 @@ function TaskStatus({
           <Square size={13} />
           {t("停止")}
         </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ReferenceImagePicker({
+  images,
+  disabled,
+  onAddFiles,
+  onChange
+}: {
+  images: ReferenceImageMeta[];
+  disabled?: boolean;
+  onAddFiles: (files: File[]) => void | Promise<void>;
+  onChange: (images: ReferenceImageMeta[]) => void;
+}) {
+  const { t } = useI18n();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <div className="reference-image-picker">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        disabled={disabled}
+        onChange={(event) => {
+          void onAddFiles(Array.from(event.target.files || []));
+          event.target.value = "";
+        }}
+      />
+      <div className="reference-image-header">
+        <span>{t("参考图片")}</span>
+        <button
+          className="secondary-button compact"
+          type="button"
+          disabled={disabled}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Image size={14} />
+          {t("选择图片")}
+        </button>
+        <small>{t("也可以直接粘贴图片")}</small>
+      </div>
+      {images.length > 0 ? (
+        <div className="reference-image-list">
+          {images.map((image) => (
+            <span className="reference-image-chip" key={image.id} title={image.path}>
+              <Image size={13} />
+              {image.name}
+              <button
+                type="button"
+                className="inline-icon-button"
+                disabled={disabled}
+                onClick={() => onChange(images.filter((item) => item.id !== image.id))}
+                title={t("移除参考图片")}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -967,6 +1074,7 @@ function PagesView({
     [project.meta.pages, selectedPageId]
   );
   const [prompt, setPrompt] = useState(selectedPage?.uiPrompt || "");
+  const [referenceImages, setReferenceImages] = useState<ReferenceImageMeta[]>([]);
   const [imageData, setImageData] = useState("");
   const [assetPreview, setAssetPreview] = useState<PageAssetPreview | null>(null);
   const [imageVersions, setImageVersions] = useState<PageImageVersion[]>([]);
@@ -1001,6 +1109,35 @@ function PagesView({
   const imageRef = useRef<HTMLImageElement | null>(null);
   const imageStreamEndRef = useRef<HTMLDivElement | null>(null);
   const selectedSliceItemRef = useRef<HTMLDivElement | null>(null);
+
+  async function addReferenceImageFiles(files: File[]) {
+    if (activeImageTask) {
+      return;
+    }
+
+    try {
+      const saved = await saveReferenceImageFiles(project.rootDir, files);
+      if (saved.length === 0) {
+        return;
+      }
+
+      setReferenceImages((current) => [...current, ...saved]);
+      onError("");
+    } catch (error) {
+      onError(toErrorMessage(error));
+    }
+  }
+
+  function handleReferenceImagePaste(event: ClipboardEvent<HTMLElement>) {
+    const files = getClipboardImageFiles(event);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    void addReferenceImageFiles(files);
+  }
 
   useEffect(() => {
     imageStreamEndRef.current?.scrollIntoView({ block: "end" });
@@ -1119,10 +1256,12 @@ function PagesView({
         pageId: selectedPage.id,
         prompt,
         annotations: pageAnnotations,
+        referenceImagePaths: referenceImages.map((image) => image.path),
         model: "gpt-5.5",
         reasoningEffort: "high"
       });
       onProjectChange(updated);
+      setReferenceImages([]);
       setPageAnnotations([]);
       setAnnotationPopover(null);
       setAnnotationMode(false);
@@ -2060,21 +2199,29 @@ function PagesView({
           ) : null}
         </div>
 
-	        <div className="prompt-bar">
-	          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder={t("输入界面风格")}
+        <div className="prompt-composer" onPaste={handleReferenceImagePaste}>
+          <ReferenceImagePicker
+            images={referenceImages}
+            disabled={Boolean(activeImageTask)}
+            onAddFiles={addReferenceImageFiles}
+            onChange={setReferenceImages}
           />
-          <button
-            className="primary-button send-button"
-            onClick={generatePageImage}
-            disabled={!selectedPage || Boolean(activeImageTask)}
-          >
-            <Send size={18} />
-	            {activeImageTask ? t("处理中") : t("生成图片")}
-	          </button>
-	        </div>
+          <div className="prompt-bar">
+            <textarea
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder={t("输入界面风格")}
+            />
+            <button
+              className="primary-button send-button"
+              onClick={generatePageImage}
+              disabled={!selectedPage || Boolean(activeImageTask)}
+            >
+              <Send size={18} />
+              {activeImageTask ? t("处理中") : t("生成图片")}
+            </button>
+          </div>
+        </div>
         {contextMenu ? (
           <div
             className={contextMenu.type === "slice" ? "canvas-context-menu slice-action-menu" : "canvas-context-menu"}
@@ -2442,6 +2589,52 @@ function removeImageAnnotationPrompt(value: string, annotationId: string): strin
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("参考图片读取失败"));
+    });
+    reader.addEventListener("error", () => reject(reader.error || new Error("参考图片读取失败")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function getClipboardImageFiles(event: ClipboardEvent<HTMLElement>): File[] {
+  const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+
+  if (files.length > 0) {
+    return files;
+  }
+
+  return Array.from(event.clipboardData.items)
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+}
+
+async function saveReferenceImageFiles(projectRoot: string, files: File[]): Promise<ReferenceImageMeta[]> {
+  const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+
+  return Promise.all(
+    imageFiles.map(async (file) => {
+      const dataUrl = await readFileAsDataUrl(file);
+      return api.saveReferenceImage({
+        projectRoot,
+        name: file.name,
+        mimeType: file.type,
+        dataUrl
+      });
+    })
+  );
 }
 
 function formatStreamLevel(level: AiStreamEvent["level"], t: (source: string) => string): string {

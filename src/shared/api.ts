@@ -23,9 +23,11 @@ import type {
   ReadDocumentInput,
   ReadProjectFileInput,
   ReadProjectFileResult,
+  ReferenceImageMeta,
   ReviseDocumentInput,
   ReviseDocumentResult,
   RunPlanningInput,
+  SaveReferenceImageInput,
   SaveSliceSelectionsInput,
   SetActivePageImageVersionInput,
   SyncPagePlanInput,
@@ -53,6 +55,7 @@ export interface ElectronApi {
   listPageImageVersions: (input: ListPageImageVersionsInput) => Promise<PageImageVersion[]>;
   setActivePageImageVersion: (input: SetActivePageImageVersionInput) => Promise<ProjectInfo>;
   exportProjectZip: (input: ExportProjectInput) => Promise<ExportProjectResult>;
+  saveReferenceImage: (input: SaveReferenceImageInput) => Promise<ReferenceImageMeta>;
   readAssetAsDataUrl: (input: ReadAssetInput) => Promise<string>;
   readDocument: (input: ReadDocumentInput) => Promise<string>;
   listProjectFiles: (input: ListProjectFilesInput) => Promise<ProjectFileNode[]>;

@@ -64,6 +64,49 @@ describe("CodexImageProvider", () => {
     );
   });
 
+  it("passes project reference images to codex image generation with -i arguments", async () => {
+    const projectRoot = await makeTempDir("image-reference-project");
+    const commandRoot = await makeTempDir("fake-image-codex-bin");
+    const command = path.join(commandRoot, "codex");
+    const provider = new CodexImageProvider({
+      command,
+      args: [],
+      timeoutMs: 5_000
+    });
+    const referencePath = path.join(projectRoot, "tmp/reference-images/ref.png");
+
+    await fs.writeFile(command, `#!/usr/bin/env node\nrequire(${JSON.stringify(path.resolve("tests/fixtures/fake-image-codex.cjs"))});\n`, "utf8");
+    await fs.chmod(command, 0o755);
+    await fs.mkdir(path.dirname(referencePath), { recursive: true });
+    await fs.writeFile(referencePath, "fake image");
+
+    const result = await provider.generatePageImage(
+      {
+        projectRoot,
+        page: {
+          id: "page_home",
+          name: "首页",
+          route: "/",
+          description: "首页",
+          uiPrompt: "首页 UI",
+          assetIds: []
+        },
+        prompt: "按参考图片生成首页",
+        outputPath: path.join(projectRoot, "assets/pages/page_home/ui.png")
+      },
+      {
+        referenceImagePaths: ["tmp/reference-images/ref.png"]
+      }
+    );
+
+    const [logFile] = await fs.readdir(path.join(projectRoot, "logs"));
+    const log = await fs.readFile(path.join(projectRoot, "logs", logFile), "utf8");
+
+    expect(result).toBe("assets/pages/page_home/ui.png");
+    expect(log).toContain(`-i ${referencePath}`);
+    expect(log).toContain(`referenceImages=${referencePath}`);
+  });
+
   it("reports codex timeout clearly", async () => {
     const projectRoot = await makeTempDir("image-project");
     const provider = new CodexImageProvider({

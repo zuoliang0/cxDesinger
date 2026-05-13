@@ -879,6 +879,84 @@ h2 {
   border-top: 0;
 }
 
+.prompt-composer {
+  border-top: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.prompt-composer .prompt-bar {
+  border-top: 0;
+}
+
+.reference-image-picker {
+  padding: 9px 12px 0;
+}
+
+.reference-image-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reference-image-header > span {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.reference-image-header small {
+  color: var(--muted);
+}
+
+.reference-image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.reference-image-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 1px solid #b7d4ff;
+  border-radius: 999px;
+  color: #175cd3;
+  background: #eef6ff;
+  font-size: 12px;
+}
+
+.reference-image-chip > svg {
+  flex: 0 0 auto;
+}
+
+.reference-image-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  color: #175cd3;
+  background: transparent;
+  cursor: pointer;
+}
+
+.inline-icon-button:hover:not(:disabled) {
+  background: rgba(23, 92, 211, 0.12);
+}
+
 .task-status {
   display: inline-flex;
   align-items: center;

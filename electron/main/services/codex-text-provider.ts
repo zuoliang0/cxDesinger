@@ -100,6 +100,7 @@ export interface CodexStreamOptions {
   onEvent?: (level: AiStreamLevel, message: string) => void;
   model?: CodexModel;
   reasoningEffort?: CodexReasoningEffort;
+  referenceImagePaths?: string[];
   signal?: AbortSignal;
 }
 
@@ -121,7 +122,7 @@ export class CodexTextProvider {
     const logRelativePath = `logs/planning-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
     const logPath = path.join(projectRoot, logRelativePath);
     const args = [
-      ...this.withRunOptions(this.options.args, streamOptions),
+      ...this.withRunOptions(this.options.args, streamOptions, projectRoot),
       "exec",
       "--cd",
       projectRoot,
@@ -144,6 +145,7 @@ export class CodexTextProvider {
       `cwd=${projectRoot}`,
       `command=${this.options.command}`,
       `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
       "[prompt]",
       requirement,
@@ -195,7 +197,7 @@ export class CodexTextProvider {
     const logRelativePath = `logs/document-revision-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
     const logPath = path.join(projectRoot, logRelativePath);
     const args = [
-      ...this.withRunOptions(this.options.args, streamOptions),
+      ...this.withRunOptions(this.options.args, streamOptions, projectRoot),
       "exec",
       "--cd",
       projectRoot,
@@ -219,6 +221,7 @@ export class CodexTextProvider {
       `document=${documentPath}`,
       `command=${this.options.command}`,
       `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
       "[instruction]",
       instruction,
@@ -269,7 +272,7 @@ export class CodexTextProvider {
     const logRelativePath = `logs/page-plan-sync-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
     const logPath = path.join(projectRoot, logRelativePath);
     const args = [
-      ...this.withRunOptions(this.options.args, streamOptions),
+      ...this.withRunOptions(this.options.args, streamOptions, projectRoot),
       "exec",
       "--cd",
       projectRoot,
@@ -294,6 +297,7 @@ export class CodexTextProvider {
       "pagesJson=pages.json",
       `command=${this.options.command}`,
       `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
       "[instruction]",
       "read page plan and pages.json from the project root, then output normalized pages metadata",
@@ -334,7 +338,7 @@ export class CodexTextProvider {
     }
   }
 
-  private withRunOptions(args: string[], options: CodexStreamOptions): string[] {
+  private withRunOptions(args: string[], options: CodexStreamOptions, projectRoot: string): string[] {
     if (!this.isCodexCommand()) {
       return args;
     }
@@ -345,11 +349,43 @@ export class CodexTextProvider {
 
     return [
       ...filteredArgs,
+      ...this.toCodexImageArgs(projectRoot, options.referenceImagePaths),
       "--model",
       model,
       "--config",
       `model_reasoning_effort="${reasoningEffort}"`
     ];
+  }
+
+  private toCodexImageArgs(projectRoot: string, referenceImagePaths: string[] | undefined): string[] {
+    return this.normalizeReferenceImagePaths(projectRoot, referenceImagePaths).flatMap((imagePath) => [
+      "-i",
+      imagePath
+    ]);
+  }
+
+  private normalizeReferenceImagePaths(projectRoot: string, referenceImagePaths: string[] | undefined): string[] {
+    const root = path.resolve(projectRoot);
+    const unique = new Set<string>();
+
+    for (const imagePath of referenceImagePaths || []) {
+      const trimmed = imagePath.trim();
+
+      if (!trimmed) {
+        continue;
+      }
+
+      const resolved = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(root, trimmed);
+      const relative = path.relative(root, resolved);
+
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("参考图片必须位于项目根目录内");
+      }
+
+      unique.add(resolved);
+    }
+
+    return [...unique];
   }
 
   private removeOverriddenCodexArgs(args: string[]): string[] {
@@ -394,6 +430,7 @@ export class CodexTextProvider {
     return [
       "你是一个资深产品经理、UI 信息架构师和技术方案设计师。",
       "请基于用户需求生成结构化项目规划，最终只返回符合 JSON Schema 的 JSON。",
+      "如果本次命令通过 -i 附加了参考图片，请把图片内容作为产品规划、视觉风格和页面规划的参考，但不要臆造与用户需求冲突的业务设定。",
       `项目类型：${projectType === "app" ? "APP" : "WEB"}`,
       "需要覆盖：沟通记录、PRD、功能规划、技术方案、全局视觉风格规范、页面规划、功能清单。",
       "documents.styleGuide 将写入 docs/style.md，作为后续所有页面图片生成的统一视觉规范。",
@@ -416,6 +453,7 @@ export class CodexTextProvider {
     return [
       "你是一个资深产品文档编辑助手。",
       "请只根据用户修改意见更新当前这一份 Markdown 文档，不要生成或改写其它文档。",
+      "如果本次命令通过 -i 附加了参考图片，请结合图片内容理解用户修改意见，并在当前文档中准确体现相关调整。",
       "当前工作目录是项目根目录；如需了解现有内容，请自行读取下面给出的相对路径文件。",
       "保留文档原有结构中仍然有效的内容；只做用户要求的补充、删改、重排或语气调整。",
       "最终只返回符合 JSON Schema 的 JSON：content 为完整的新 Markdown 文档，summary 为本次修改摘要。",

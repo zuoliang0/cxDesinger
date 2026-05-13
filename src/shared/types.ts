@@ -158,6 +158,7 @@ export interface CreateProjectInput {
 export interface RunPlanningInput {
   projectRoot: string;
   requirement: string;
+  referenceImagePaths?: string[];
   taskId?: string;
   model?: CodexModel;
   reasoningEffort?: CodexReasoningEffort;
@@ -167,6 +168,7 @@ export interface ReviseDocumentInput {
   projectRoot: string;
   documentPath: string;
   instruction: string;
+  referenceImagePaths?: string[];
   taskId?: string;
   model?: CodexModel;
   reasoningEffort?: CodexReasoningEffort;
@@ -192,9 +194,25 @@ export interface GeneratePageImageInput {
   pageId: string;
   prompt: string;
   annotations?: PageImageAnnotation[];
+  referenceImagePaths?: string[];
   taskId?: string;
   model?: CodexModel;
   reasoningEffort?: CodexReasoningEffort;
+}
+
+export interface ReferenceImageMeta {
+  id: string;
+  name: string;
+  path: string;
+  mimeType: string;
+  createdAt: string;
+}
+
+export interface SaveReferenceImageInput {
+  projectRoot: string;
+  name?: string;
+  mimeType: string;
+  dataUrl: string;
 }
 
 export interface GeneratePageBackgroundInput {

@@ -20,6 +20,7 @@ const api: ElectronApi = {
   listPageImageVersions: (input) => ipcRenderer.invoke("image:listVersions", input),
   setActivePageImageVersion: (input) => ipcRenderer.invoke("image:setActiveVersion", input),
   exportProjectZip: (input) => ipcRenderer.invoke("project:exportZip", input),
+  saveReferenceImage: (input) => ipcRenderer.invoke("project:saveReferenceImage", input),
   readAssetAsDataUrl: (input) => ipcRenderer.invoke("project:readAsset", input),
   readDocument: (input) => ipcRenderer.invoke("project:readDocument", input),
   listProjectFiles: (input) => ipcRenderer.invoke("project:listFiles", input),

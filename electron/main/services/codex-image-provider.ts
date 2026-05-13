@@ -124,6 +124,7 @@ export interface CodexImageStreamOptions {
   onEvent?: (level: AiStreamLevel, message: string) => void;
   model?: CodexModel;
   reasoningEffort?: CodexReasoningEffort;
+  referenceImagePaths?: string[];
   signal?: AbortSignal;
 }
 
@@ -287,7 +288,7 @@ export class CodexImageProvider {
     const logRelativePath = `logs/image-${task.kind}-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
     const logPath = path.join(task.projectRoot, logRelativePath);
     const args = [
-      ...this.withRunOptions(this.options.args, streamOptions),
+      ...this.withRunOptions(this.options.args, streamOptions, task.projectRoot),
       "exec",
       "--cd",
       task.projectRoot,
@@ -321,6 +322,7 @@ export class CodexImageProvider {
       `output=${relativeOutputPath}`,
       `command=${this.options.command}`,
       `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(task.projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
       "[prompt]",
       task.prompt,
@@ -387,7 +389,7 @@ export class CodexImageProvider {
     const logRelativePath = `logs/image-slice-assets-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
     const logPath = path.join(params.projectRoot, logRelativePath);
     const args = [
-      ...this.withRunOptions(this.options.args, streamOptions),
+      ...this.withRunOptions(this.options.args, streamOptions, params.projectRoot),
       "exec",
       "--cd",
       params.projectRoot,
@@ -413,6 +415,7 @@ export class CodexImageProvider {
       `outputs=${relativeOutputPaths.join(", ")}`,
       `command=${this.options.command}`,
       `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(params.projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
       "[prompt]",
       this.createSliceAssetsPrompt(params),
@@ -496,7 +499,7 @@ export class CodexImageProvider {
     const logPath = path.join(params.projectRoot, logRelativePath);
     const prompt = this.createSliceIdentificationPrompt(params);
     const args = [
-      ...this.withRunOptions(this.options.args, streamOptions),
+      ...this.withRunOptions(this.options.args, streamOptions, params.projectRoot),
       "exec",
       "--cd",
       params.projectRoot,
@@ -521,6 +524,7 @@ export class CodexImageProvider {
       `source=${params.sourceImagePath}`,
       `command=${this.options.command}`,
       `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(params.projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
       "[prompt]",
       prompt,
@@ -580,6 +584,7 @@ export class CodexImageProvider {
     return [
       "你是一个具备图片生成能力的资深 UI 视觉设计师。",
       "请读取项目根目录下的 pages.json，结合完整页面规划和当前页面信息，为指定页面生成一张高质量 UI 效果图。",
+      "如果本次命令通过 -i 附加了用户参考图片，请优先参考这些图片的布局、风格、构图、组件细节或视觉方向，并与 pages.json 和 docs/style.md 保持一致。",
       "必须调用 Codex 可用的图片生成工具或内置图片生成能力（例如 image_gen / image generation tool）来生成最终位图。",
       "必须直接在项目目录中生成 PNG 图片文件，不要只写 HTML、SVG、Markdown 或代码说明。",
       "最终只返回符合 JSON Schema 的 JSON：path 为生成图片相对项目根目录的路径。",
@@ -761,7 +766,7 @@ export class CodexImageProvider {
     return kept.join("\n").replace(/\n{3,}/gu, "\n\n").trim();
   }
 
-  private withRunOptions(args: string[], options: CodexImageStreamOptions): string[] {
+  private withRunOptions(args: string[], options: CodexImageStreamOptions, projectRoot: string): string[] {
     if (!this.isCodexCommand()) {
       return args;
     }
@@ -772,11 +777,43 @@ export class CodexImageProvider {
 
     return [
       ...filteredArgs,
+      ...this.toCodexImageArgs(projectRoot, options.referenceImagePaths),
       "--model",
       model,
       "--config",
       `model_reasoning_effort="${reasoningEffort}"`
     ];
+  }
+
+  private toCodexImageArgs(projectRoot: string, referenceImagePaths: string[] | undefined): string[] {
+    return this.normalizeReferenceImagePaths(projectRoot, referenceImagePaths).flatMap((imagePath) => [
+      "-i",
+      imagePath
+    ]);
+  }
+
+  private normalizeReferenceImagePaths(projectRoot: string, referenceImagePaths: string[] | undefined): string[] {
+    const root = path.resolve(projectRoot);
+    const unique = new Set<string>();
+
+    for (const imagePath of referenceImagePaths || []) {
+      const trimmed = imagePath.trim();
+
+      if (!trimmed) {
+        continue;
+      }
+
+      const resolved = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(root, trimmed);
+      const relative = path.relative(root, resolved);
+
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("参考图片必须位于项目根目录内");
+      }
+
+      unique.add(resolved);
+    }
+
+    return [...unique];
   }
 
   private removeOverriddenCodexArgs(args: string[]): string[] {

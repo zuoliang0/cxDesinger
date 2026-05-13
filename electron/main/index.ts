@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import type {
   AppSettings,
@@ -18,6 +19,7 @@ import type {
   ResizeCodeTerminalInput,
   ReviseDocumentInput,
   RunPlanningInput,
+  SaveReferenceImageInput,
   SaveSliceSelectionsInput,
   SetActivePageImageVersionInput,
   SyncPagePlanInput,
@@ -90,6 +92,45 @@ function emitAiStream(
     message,
     createdAt: new Date().toISOString()
   });
+}
+
+function getReferenceImageExtension(mimeType: string): string {
+  const normalized = mimeType.toLowerCase();
+
+  if (normalized === "image/jpeg" || normalized === "image/jpg") {
+    return ".jpg";
+  }
+
+  if (normalized === "image/webp") {
+    return ".webp";
+  }
+
+  if (normalized === "image/gif") {
+    return ".gif";
+  }
+
+  if (normalized === "image/png") {
+    return ".png";
+  }
+
+  throw new Error("仅支持 PNG、JPG、WEBP、GIF 参考图片");
+}
+
+function decodeReferenceImageDataUrl(dataUrl: string, mimeType: string): Buffer {
+  const match = dataUrl.match(/^data:([^;,]+);base64,(.+)$/u);
+
+  if (!match) {
+    throw new Error("参考图片数据格式无效");
+  }
+
+  const declaredMimeType = match[1].toLowerCase();
+  const expectedMimeType = mimeType.toLowerCase();
+
+  if (declaredMimeType !== expectedMimeType) {
+    throw new Error("参考图片 MIME 类型不一致");
+  }
+
+  return Buffer.from(match[2], "base64");
 }
 
 function createWindow(): void {
@@ -177,6 +218,7 @@ function registerIpc(): void {
       return await service.runPlanning(input.projectRoot, input.requirement, {
         model: input.model,
         reasoningEffort: input.reasoningEffort,
+        referenceImagePaths: input.referenceImagePaths,
         signal,
         onEvent: (level, message) =>
           emitAiStream(BrowserWindow.fromWebContents(event.sender), input.taskId, "planning", level, message)
@@ -198,6 +240,7 @@ function registerIpc(): void {
       return await service.reviseDocument(input.projectRoot, input.documentPath, input.instruction, {
         model: input.model,
         reasoningEffort: input.reasoningEffort,
+        referenceImagePaths: input.referenceImagePaths,
         signal,
         onEvent: (level, message) =>
           emitAiStream(BrowserWindow.fromWebContents(event.sender), input.taskId, "document", level, message)
@@ -245,6 +288,7 @@ function registerIpc(): void {
         {
           model: input.model,
           reasoningEffort: input.reasoningEffort,
+          referenceImagePaths: input.referenceImagePaths,
           signal,
           onEvent: (level, message) =>
             emitAiStream(BrowserWindow.fromWebContents(_event.sender), input.taskId, "image", level, message)
@@ -401,6 +445,40 @@ function registerIpc(): void {
 
     await zipService.exportProject(input.projectRoot, result.filePath);
     return { zipPath: result.filePath };
+  });
+
+  ipcMain.handle("project:saveReferenceImage", async (_event, input: SaveReferenceImageInput) => {
+    await projectService.openProject(input.projectRoot);
+    const extension = getReferenceImageExtension(input.mimeType);
+    const buffer = decodeReferenceImageDataUrl(input.dataUrl, input.mimeType);
+
+    if (buffer.length === 0) {
+      throw new Error("参考图片不能为空");
+    }
+
+    if (buffer.length > 20 * 1024 * 1024) {
+      throw new Error("参考图片不能超过 20MB");
+    }
+
+    const id = `ref_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const safeName = (input.name || `reference${extension}`)
+      .replace(/[\\/:\0]/gu, "_")
+      .replace(/\s+/gu, "_")
+      .slice(0, 80);
+    const fileName = `${id}_${safeName.endsWith(extension) ? safeName : `${safeName}${extension}`}`;
+    const relativePath = `tmp/reference-images/${fileName}`;
+    const absolutePath = ensureInsideProject(input.projectRoot, relativePath);
+
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, buffer);
+
+    return {
+      id,
+      name: input.name?.trim() || fileName,
+      path: relativePath,
+      mimeType: input.mimeType,
+      createdAt: new Date().toISOString()
+    };
   });
 
   ipcMain.handle("project:readAsset", async (_event, input: ReadAssetInput) => {

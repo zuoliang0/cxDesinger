@@ -466,6 +466,13 @@ export function createDemoApi(): ElectronApi {
       return demoProject;
     },
     exportProjectZip: async () => ({ zipPath: "Demo/AI 产品设计示例.zip" }),
+    saveReferenceImage: async (input) => ({
+      id: `ref_${Date.now()}`,
+      name: input.name || "reference.png",
+      path: `tmp/reference-images/${Date.now()}-${input.name || "reference.png"}`,
+      mimeType: input.mimeType,
+      createdAt: new Date().toISOString()
+    }),
     readAssetAsDataUrl: async () =>
       `data:image/svg+xml;base64,${btoa(`
         <svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600">

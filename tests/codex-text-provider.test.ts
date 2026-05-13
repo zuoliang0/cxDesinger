@@ -31,6 +31,31 @@ describe("CodexTextProvider", () => {
     });
   });
 
+  it("passes project reference images to codex with -i arguments", async () => {
+    const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "text-reference-project-"));
+    const command = await makeCodexShim(path.resolve("tests/fixtures/fake-codex.cjs"));
+    const provider = new CodexTextProvider({
+      command,
+      args: [],
+      timeoutMs: 5_000
+    });
+    const referencePath = path.join(projectRoot, "tmp/reference-images/ref.png");
+
+    await fs.mkdir(path.dirname(referencePath), { recursive: true });
+    await fs.writeFile(referencePath, "fake image");
+
+    await provider.runPlanning(projectRoot, "做一个参考图片驱动的应用", "web", {
+      referenceImagePaths: ["tmp/reference-images/ref.png"]
+    });
+
+    const logDir = path.join(projectRoot, "logs");
+    const [logFile] = await fs.readdir(logDir);
+    const log = await fs.readFile(path.join(logDir, logFile), "utf8");
+
+    expect(log).toContain(`-i ${referencePath}`);
+    expect(log).toContain(`referenceImages=${referencePath}`);
+  });
+
   it("parses document revision output and streams process chunks", async () => {
     const command = await makeCodexShim(path.resolve("tests/fixtures/fake-doc-codex.cjs"));
     const provider = new CodexTextProvider({
