@@ -580,17 +580,19 @@ export class CodexImageProvider {
 
   private createPageImagePrompt(params: GeneratePageImageParams): string {
     const outputRelativePath = toProjectRelativePath(params.projectRoot, params.outputPath);
+    const dataContext = this.createPageDataContext(params.page);
 
     return [
       "你是一个具备图片生成能力的资深 UI 视觉设计师。",
-      "请读取项目根目录下的 pages.json，结合完整页面规划和当前页面信息，为指定页面生成一张高质量 UI 效果图。",
-      "如果本次命令通过 -i 附加了用户参考图片，请优先参考这些图片的布局、风格、构图、组件细节或视觉方向，并与 pages.json 和 docs/style.md 保持一致。",
+      "请读取项目根目录下的 pages.json，并只读取当前页面的数据文件，为指定页面生成一张高质量 UI 效果图。",
+      "如果本次命令通过 -i 附加了用户参考图片，请优先参考这些图片的布局、风格、构图、组件细节或视觉方向，并与 pages.json、当前页面数据和 docs/style.md 保持一致。",
       "必须调用 Codex 可用的图片生成工具或内置图片生成能力（例如 image_gen / image generation tool）来生成最终位图。",
       "必须直接在项目目录中生成 PNG 图片文件，不要只写 HTML、SVG、Markdown 或代码说明。",
       "最终只返回符合 JSON Schema 的 JSON：path 为生成图片相对项目根目录的路径。",
       "",
-      "上下文文件：pages.json",
+      "上下文文件：pages.json（项目索引）",
       "全局视觉规范文件：docs/style.md（如果存在，必须读取并优先遵循）",
+      ...dataContext,
       `当前页面 ID：${params.page.id}`,
       `当前页面路径：${params.page.route}`,
       `目标输出路径：${outputRelativePath}`,
@@ -614,7 +616,7 @@ export class CodexImageProvider {
       "",
       "生成要求：",
       "- 画面必须符合 pages.json.project 中的项目类型、目标使用场景和当前页面规划；不要强行套用其他项目的设备、平台或业务设定。",
-      "- 必须优先遵循 docs/style.md（如果存在）和 pages.json 中同项目页面风格，保持导航、色彩、组件语言一致。",
+      "- 必须优先遵循 docs/style.md（如果存在）、pages.json 项目索引和当前页面数据文件，保持导航、色彩、组件语言一致。",
       "- 图片需要体现真实界面布局、关键组件、状态和主要文案，不要生成抽象插画。",
       "- 不要把 Swift、Python、HTML/CSS、SVG、Canvas、截图脚本或程序化绘图结果当作最终图片；这些只能作为临时辅助，最终 PNG 必须来自图片生成能力。",
       "- 如果存在批注，必须优先基于参考图片和批注内容做定向修改，未批注区域尽量保持原有设计连续性。",
@@ -624,14 +626,16 @@ export class CodexImageProvider {
 
   private createSliceIdentificationPrompt(params: IdentifySliceSelectionsParams): string {
     const stableUiPrompt = this.getStablePageUiPrompt(params.page);
+    const dataContext = this.createPageDataContext(params.page);
 
     return [
       "你是一个资深 UI 设计资产标注专家。",
-      "请读取 pages.json、docs/style.md（如果存在）和当前页面 UI 图片，自动识别适合切成独立素材的 UI 组件区域。",
+      "请读取 pages.json、当前页面数据文件、docs/style.md（如果存在）和当前页面 UI 图片，自动识别适合切成独立素材的 UI 组件区域。",
       "最终只返回符合 JSON Schema 的 JSON：selections 为识别出的切图区域数组。",
       "",
-      "上下文文件：pages.json",
+      "上下文文件：pages.json（项目索引）",
       "全局视觉规范文件：docs/style.md（如果存在，必须读取并保持命名与风格判断一致）",
+      ...dataContext,
       `当前页面 ID：${params.page.id}`,
       `当前页面名称：${params.page.name}`,
       `当前页面路径：${params.page.route}`,
@@ -656,16 +660,18 @@ export class CodexImageProvider {
   private createPageBackgroundPrompt(params: GeneratePageBackgroundParams): string {
     const outputRelativePath = toProjectRelativePath(params.projectRoot, params.outputPath);
     const stableUiPrompt = this.getStablePageUiPrompt(params.page);
+    const dataContext = this.createPageDataContext(params.page);
 
     return [
       "你是一个具备图片生成能力的资深 UI 背景资产设计师。",
-      "请读取项目根目录下的 pages.json，并参考当前页面 UI 效果图，为指定页面提取或重绘一张可复用的纯背景 PNG。",
+      "请读取项目根目录下的 pages.json 和当前页面数据文件，并参考当前页面 UI 效果图，为指定页面提取或重绘一张可复用的纯背景 PNG。",
       "必须调用 Codex 可用的图片生成工具或内置图片生成能力（例如 image_gen / image generation tool）生成最终位图。",
       "必须直接在项目目录中生成 PNG 图片文件，不要只写 HTML、SVG、Markdown 或代码说明。",
       "最终只返回符合 JSON Schema 的 JSON：path 为生成图片相对项目根目录的路径。",
       "",
-      "上下文文件：pages.json",
+      "上下文文件：pages.json（项目索引）",
       "全局视觉规范文件：docs/style.md（如果存在，必须读取并保持一致）",
+      ...dataContext,
       `当前页面 ID：${params.page.id}`,
       `当前页面名称：${params.page.name}`,
       `当前页面路径：${params.page.route}`,
@@ -687,19 +693,21 @@ export class CodexImageProvider {
 
   private createSliceAssetsPrompt(params: GenerateSliceAssetsParams): string {
     const stableUiPrompt = this.getStablePageUiPrompt(params.page);
+    const dataContext = this.createPageDataContext(params.page);
 
     return [
       "Use $ai-product-sprite-slicer to generate these UI slice assets.",
       "你是一个具备图片生成能力的 UI 素材设计师。",
-      "请读取 pages.json，并参考源界面图片、页面原始 UI 提示词和用户框选区域，为当前页面批量生成独立精修 PNG 素材。",
+      "请读取 pages.json 和当前页面数据文件，并参考源界面图片、页面原始 UI 提示词和用户框选区域，为当前页面批量生成独立精修 PNG 素材。",
       "必须按 ai-product-sprite-slicer skill 的 chroma-key 流程执行：一次生成 sprite sheet + manifest，再用 skill 内置 split_chroma_sprite.py 拆分为多个 PNG。",
       "必须调用 Codex 可用的图片生成工具或内置图片生成能力（例如 image_gen / image generation tool）生成 sprite sheet；不要对每个区域单独调用图片生成。",
       "必须直接在项目目录中生成 PNG 图片文件，不要只写 HTML、SVG、Markdown 或代码说明。",
       "最终只返回符合 JSON Schema 的 JSON：assets 为素材结果数组，每项包含 selectionId、path、name、description。",
       "禁止输出进度 JSON 或 status 占位 JSON；中间进度只能用普通文本日志，最终 JSON 只能输出一次。",
       "",
-      "上下文文件：pages.json",
+      "上下文文件：pages.json（项目索引）",
       "全局视觉规范文件：docs/style.md（如果存在，必须读取并保持一致）",
+      ...dataContext,
       `当前页面 ID：${params.page.id}`,
       `当前页面名称：${params.page.name}`,
       `当前页面路径：${params.page.route}`,
@@ -741,6 +749,18 @@ export class CodexImageProvider {
 
   private getStablePageUiPrompt(page: PageMeta): string {
     return this.stripImageAnnotationText(page.uiPrompt).trim() || page.description || page.uiPrompt;
+  }
+
+  private createPageDataContext(page: PageMeta): string[] {
+    const dataDir = page.dataDir || `pages/${page.id}`;
+
+    return [
+      `当前页面数据目录：${dataDir}`,
+      `当前页面详情文件：${dataDir}/page.json`,
+      `当前页面素材文件：${dataDir}/assets.json`,
+      `当前页面切图区域文件：${dataDir}/slice-selections.json`,
+      "不要读取其他页面目录，除非用户明确要求跨页面对比。"
+    ];
   }
 
   private stripImageAnnotationText(input: string): string {

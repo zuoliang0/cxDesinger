@@ -9,6 +9,7 @@ const api: ElectronApi = {
   createProject: (input) => ipcRenderer.invoke("projects:create", input),
   openProject: (rootDir) => ipcRenderer.invoke("projects:open", rootDir),
   runPlanning: (input) => ipcRenderer.invoke("planning:run", input),
+  createDocument: (input) => ipcRenderer.invoke("document:create", input),
   reviseDocument: (input) => ipcRenderer.invoke("document:revise", input),
   syncPagePlan: (input) => ipcRenderer.invoke("pagePlan:sync", input),
   generatePageImage: (input) => ipcRenderer.invoke("image:generatePage", input),

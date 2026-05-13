@@ -32,17 +32,19 @@ function readZipEntries(zipPath: string): Promise<string[]> {
 }
 
 describe("ZipService", () => {
-  it("exports only pages.json, assets and docs", async () => {
+  it("exports only pages.json, pages, assets and docs", async () => {
     const projectRoot = await makeTempDir("zip-project");
     const outputDir = await makeTempDir("zip-output");
     const zipPath = path.join(outputDir, "project.zip");
     const service = new ZipService();
 
     await fs.mkdir(path.join(projectRoot, "assets", "pages"), { recursive: true });
+    await fs.mkdir(path.join(projectRoot, "pages", "page_home"), { recursive: true });
     await fs.mkdir(path.join(projectRoot, "docs"), { recursive: true });
     await fs.mkdir(path.join(projectRoot, "logs"), { recursive: true });
     await fs.mkdir(path.join(projectRoot, "tmp"), { recursive: true });
     await fs.writeFile(path.join(projectRoot, "pages.json"), "{}\n", "utf8");
+    await fs.writeFile(path.join(projectRoot, "pages", "page_home", "page.json"), "{}\n", "utf8");
     await fs.writeFile(path.join(projectRoot, "assets", "pages", "ui.png"), "image", "utf8");
     await fs.writeFile(path.join(projectRoot, "docs", "prd.md"), "# PRD\n", "utf8");
     await fs.writeFile(path.join(projectRoot, "logs", "debug.log"), "debug", "utf8");
@@ -55,7 +57,8 @@ describe("ZipService", () => {
     expect(entries).toEqual([
       "assets/pages/ui.png",
       "docs/prd.md",
-      "pages.json"
+      "pages.json",
+      "pages/page_home/page.json"
     ]);
     expect(entries.some((entry) => entry.startsWith("logs/"))).toBe(false);
     expect(entries.some((entry) => entry.startsWith("tmp/"))).toBe(false);

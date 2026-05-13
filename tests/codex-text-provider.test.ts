@@ -94,4 +94,25 @@ describe("CodexTextProvider", () => {
     expect(events.map((event) => event.message).join("\n")).not.toContain("Failed to terminate MCP process group");
     expect(events.map((event) => event.message).join("\n")).not.toContain("could not update PATH");
   });
+
+  it("parses document creation output from codex exec", async () => {
+    const command = await makeCodexShim(path.resolve("tests/fixtures/fake-doc-codex.cjs"));
+    const provider = new CodexTextProvider({
+      command,
+      args: [],
+      timeoutMs: 5_000
+    });
+
+    const output = await provider.createDocument(process.cwd(), "新增一份商业模式说明", {
+      model: "gpt-5.5",
+      reasoningEffort: "high"
+    });
+
+    expect(output).toMatchObject({
+      title: "商业模式说明",
+      fileName: "business-model.md",
+      content: expect.stringContaining("参考已有文档"),
+      summary: "已创建商业模式说明文档"
+    });
+  });
 });

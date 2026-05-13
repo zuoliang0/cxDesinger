@@ -60,7 +60,7 @@ describe("DocumentRevisionService", () => {
       { onEvent: streamEvents }
     );
     expect(result.content).toContain("已补充儿童涂色流程");
-    expect(result.project.meta.pages).toEqual([originalPage]);
+    expect(result.project.meta.pages[0]).toMatchObject(originalPage);
     await expect(fs.readFile(path.join(rootDir, "docs/prd.md"), "utf8")).resolves.toContain(
       "已补充儿童涂色流程"
     );

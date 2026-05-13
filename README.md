@@ -22,9 +22,9 @@ It turns a product idea into a structured project workspace: requirements become
 ![Home screen](./docs/imgs/主页.png)
 
 - Create a new self-contained product project or open an existing project folder.
-- Initialize `docs/`, `assets/`, `logs/`, `pages.json`, and a local Git repository for the product project.
+- Initialize `docs/`, `assets/`, `pages/`, `logs/`, `pages.json`, and a local Git repository for the product project.
 - Keep planning documents, UI images, generated assets, slice selections, and page metadata inside the selected project directory.
-- Export the current AI product project as a ZIP archive.
+- Export the current AI product project as a ZIP archive containing the core project data: `pages.json`, `pages/`, `assets/`, and `docs/`.
 - Switch the application UI between English, Simplified Chinese, and German.
 
 ### Product Planning
@@ -35,16 +35,16 @@ It turns a product idea into a structured project workspace: requirements become
 - Generate and maintain PRD, feature plan, technical plan, style guide, page plan, feature list, and optional animation list for app projects.
 - Render generated documents as Markdown inside the app.
 - Add line-level comments to documents and send document-specific revision instructions without regenerating the entire planning package.
-- Sync `page-plan.md` back into `pages.json` so later UI generation can use the latest page list and page descriptions.
+- Sync `page-plan.md` back into the project page index so later UI generation can use the latest page list and page descriptions.
 
 ### Page Design and Asset Extraction
 
 ![Page generation screen](./docs/imgs/页面生成.png)
 
-- Generate UI concept images for each page from `pages.json` and user prompts.
+- Generate UI concept images for each page from the lightweight project index, per-page data files, and user prompts.
 - Keep page image versions on disk and switch the active version without losing previous results.
 - Annotate regions on an existing UI image, send the annotation plus the reference image to Codex, and regenerate a new image version.
-- Extract clean reusable page backgrounds and store the selected background path in `pages.json`.
+- Extract clean reusable page backgrounds and store the selected background path in the current page data file.
 - Let AI identify candidate slice regions, review/edit them, select multiple regions, and batch-generate assets.
 - Force-regenerate selected slices when an existing asset needs to be retried.
 - Store generated assets with stable IDs, names, descriptions, paths, source images, and selection coordinates for later implementation work.
@@ -127,17 +127,32 @@ User-created AI product projects are self-contained:
 project-root/
   docs/
   assets/
+  pages/
+    page_home/
+      page.json
+      assets.json
+      slice-selections.json
   logs/
   pages.json
 ```
 
-`pages.json` stores the core project metadata:
+`pages.json` is the lightweight project index:
 
 - `project`: project identity and type.
 - `documents`: generated and revised document index.
-- `pages`: page plan, UI prompts, active image version, background image, and update state.
-- `sliceSelections`: user or AI identified slice regions.
-- `assets`: generated assets with stable `id`, name, description, path, and source selection.
+- `pages`: page IDs, routes, summaries, update timestamps, and each page's `dataDir`.
+
+Each `pages/<pageId>/` folder stores the page-level data:
+
+- `page.json`: full page prompt, active image version, background image, and update state.
+- `assets.json`: generated assets with stable `id`, name, description, path, and source selection.
+- `slice-selections.json`: user or AI identified slice regions.
+
+### Why split page data?
+
+Earlier project files stored all page details, slice selections, and asset metadata in one large `pages.json`. That was easy to inspect, but large projects made Codex read too much unrelated context for page-level tasks. The split layout keeps the project human-readable while reducing token usage, lowering the chance of concurrent page tasks overwriting each other, and keeping Git diffs focused on the page that changed.
+
+Projects created with the older v1 layout can still be opened. On the first write, cxDesinger migrates them to the split layout and keeps a `pages.v1.backup.json` file next to the new index.
 
 ## Architecture
 

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import archiver from "archiver";
 
-const EXPORT_ENTRIES = ["pages.json", "assets", "docs"] as const;
+const EXPORT_ENTRIES = ["pages.json", "pages", "assets", "docs"] as const;
 
 export class ZipService {
   exportProject(projectRoot: string, zipPath: string): Promise<void> {

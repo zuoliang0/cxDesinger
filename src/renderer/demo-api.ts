@@ -194,6 +194,42 @@ export function createDemoApi(): ElectronApi {
         summary: "已根据修改意见更新当前文档"
       };
     },
+    createDocument: async (input) => {
+      const timestamp = new Date().toISOString();
+      const fileName = `custom-${Date.now()}.md`;
+      const documentPath = `docs/${fileName}`;
+      const content = `# 新增文档\n\n${input.instruction.trim() || "这是浏览器预览模式下创建的示例文档。"}\n`;
+
+      emitDemoStream(input.taskId, "document", "status", "正在启动新建文档任务");
+      emitDemoStream(input.taskId, "document", "stdout", "正在参考已有文档生成新文档。");
+      demoDocuments[documentPath] = content;
+      demoProject = {
+        ...demoProject,
+        meta: {
+          ...demoProject.meta,
+          project: {
+            ...demoProject.meta.project,
+            updatedAt: timestamp
+          },
+          documents: [
+            ...demoProject.meta.documents,
+            {
+              type: "custom",
+              title: "新增文档",
+              path: documentPath,
+              updatedAt: timestamp
+            }
+          ]
+        }
+      };
+      emitDemoStream(input.taskId, "document", "complete", "新文档已生成");
+      return {
+        project: demoProject,
+        documentPath,
+        content,
+        summary: "已生成新文档"
+      };
+    },
     syncPagePlan: async (input) => {
       const timestamp = new Date().toISOString();
 

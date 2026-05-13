@@ -4,6 +4,8 @@ import type {
   CloseCodeTerminalInput,
   CodeTerminalDataEvent,
   CodeTerminalExitEvent,
+  CreateDocumentInput,
+  CreateDocumentResult,
   CreateCodeTerminalInput,
   CreateProjectInput,
   ExportProjectInput,
@@ -44,6 +46,7 @@ export interface ElectronApi {
   createProject: (input: CreateProjectInput) => Promise<ProjectInfo>;
   openProject: (rootDir: string) => Promise<ProjectInfo>;
   runPlanning: (input: RunPlanningInput) => Promise<ProjectInfo>;
+  createDocument: (input: CreateDocumentInput) => Promise<CreateDocumentResult>;
   reviseDocument: (input: ReviseDocumentInput) => Promise<ReviseDocumentResult>;
   syncPagePlan: (input: SyncPagePlanInput) => Promise<ProjectInfo>;
   generatePageImage: (input: GeneratePageImageInput) => Promise<ProjectInfo>;

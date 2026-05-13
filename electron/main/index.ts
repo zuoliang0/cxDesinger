@@ -5,6 +5,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import type {
   AppSettings,
   CloseCodeTerminalInput,
+  CreateDocumentInput,
   CreateCodeTerminalInput,
   ExportProjectInput,
   GeneratePageBackgroundInput,
@@ -31,6 +32,7 @@ import { ensureInsideProject, getMimeType } from "./utils/fs";
 import { CodexImageProvider } from "./services/codex-image-provider";
 import { CodexTextProvider } from "./services/codex-text-provider";
 import { CodeTerminalService } from "./services/code-terminal-service";
+import { DocumentCreationService } from "./services/document-creation-service";
 import { DocumentRevisionService } from "./services/document-revision-service";
 import { ImageService } from "./services/image-service";
 import { PagePlanSyncService } from "./services/page-plan-sync-service";
@@ -238,6 +240,28 @@ function registerIpc(): void {
 
     try {
       return await service.reviseDocument(input.projectRoot, input.documentPath, input.instruction, {
+        model: input.model,
+        reasoningEffort: input.reasoningEffort,
+        referenceImagePaths: input.referenceImagePaths,
+        signal,
+        onEvent: (level, message) =>
+          emitAiStream(BrowserWindow.fromWebContents(event.sender), input.taskId, "document", level, message)
+      });
+    } finally {
+      endTask(input.taskId);
+    }
+  });
+
+  ipcMain.handle("document:create", async (event, input: CreateDocumentInput) => {
+    const signal = beginTask(input.taskId);
+    const settings = await settingsService.getSettings();
+    const service = new DocumentCreationService(
+      projectService,
+      CodexTextProvider.fromSettings(settings)
+    );
+
+    try {
+      return await service.createDocument(input.projectRoot, input.instruction, {
         model: input.model,
         reasoningEffort: input.reasoningEffort,
         referenceImagePaths: input.referenceImagePaths,

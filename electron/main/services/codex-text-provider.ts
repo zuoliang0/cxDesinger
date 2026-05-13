@@ -7,11 +7,13 @@ import type {
   AppSettings,
   CodexModel,
   CodexReasoningEffort,
+  DocumentCreationOutput,
   DocumentRevisionOutput,
   PagePlanSyncOutput,
   PlanningOutput
 } from "../../../src/shared/types";
 import {
+  documentCreationOutputSchema,
   documentRevisionOutputSchema,
   pagePlanSyncOutputSchema,
   planningOutputSchema
@@ -61,6 +63,18 @@ const DOCUMENT_REVISION_OUTPUT_JSON_SCHEMA = {
   additionalProperties: false,
   required: ["content", "summary"],
   properties: {
+    content: { type: "string", minLength: 1 },
+    summary: { type: "string", minLength: 1 }
+  }
+};
+
+const DOCUMENT_CREATION_OUTPUT_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "fileName", "content", "summary"],
+  properties: {
+    title: { type: "string", minLength: 1 },
+    fileName: { type: "string", minLength: 1 },
     content: { type: "string", minLength: 1 },
     summary: { type: "string", minLength: 1 }
   }
@@ -257,6 +271,80 @@ export class CodexTextProvider {
       await this.appendLog(logPath, `status=failed\nerror=${this.formatErrorForLog(error)}\n`);
       this.emitStream(streamOptions, "error", this.formatUserFacingError(error, "文档修改"));
       throw new Error(`${this.formatUserFacingError(error, "文档修改")}。详细日志：${logRelativePath}`);
+    } finally {
+      await Promise.allSettled([fs.rm(schemaPath, { force: true }), fs.rm(outputPath, { force: true })]);
+    }
+  }
+
+  async createDocument(
+    projectRoot: string,
+    instruction: string,
+    streamOptions: CodexStreamOptions = {}
+  ): Promise<DocumentCreationOutput> {
+    const schemaPath = path.join(os.tmpdir(), `document-creation-${randomUUID()}.schema.json`);
+    const outputPath = path.join(os.tmpdir(), `document-creation-${randomUUID()}.json`);
+    const logRelativePath = `logs/document-creation-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
+    const logPath = path.join(projectRoot, logRelativePath);
+    const args = [
+      ...this.withRunOptions(this.options.args, streamOptions, projectRoot),
+      "exec",
+      "--cd",
+      projectRoot,
+      "--sandbox",
+      "read-only",
+      "--skip-git-repo-check",
+      "--output-schema",
+      schemaPath,
+      "--output-last-message",
+      outputPath,
+      "-"
+    ];
+    let stdout = "";
+    let stderr = "";
+
+    await fs.writeFile(schemaPath, JSON.stringify(DOCUMENT_CREATION_OUTPUT_JSON_SCHEMA, null, 2), "utf8");
+    this.emitStream(streamOptions, "status", "正在启动新建文档任务");
+    await this.appendLog(logPath, [
+      `time=${new Date().toISOString()}`,
+      `cwd=${projectRoot}`,
+      `command=${this.options.command}`,
+      `args=${args.join(" ")}`,
+      `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
+      "",
+      "[instruction]",
+      instruction,
+      ""
+    ].join("\n"));
+
+    try {
+      this.emitStream(streamOptions, "status", "正在调用 Codex 生成新文档");
+      const result = await runProcess({
+        command: this.options.command,
+        args,
+        stdin: this.createDocumentCreationPrompt(instruction),
+        timeoutMs: this.options.timeoutMs,
+        signal: streamOptions.signal,
+        onStdout: (chunk) => this.emitStream(streamOptions, "stdout", chunk),
+        onStderr: (chunk) => this.emitStream(streamOptions, "stderr", chunk)
+      });
+      stdout = result.stdout;
+      stderr = result.stderr;
+      await this.appendCommandResult(logPath, stdout, stderr);
+
+      const raw = await fs.readFile(outputPath, "utf8");
+      await this.appendLog(logPath, ["", "[output-last-message]", raw, ""].join("\n"));
+      const parsed = documentCreationOutputSchema.parse(JSON.parse(raw)) as DocumentCreationOutput;
+      await this.appendLog(logPath, "status=success\n");
+      this.emitStream(streamOptions, "complete", "新文档已生成");
+      return parsed;
+    } catch (error) {
+      const maybeProcessError = error as { stdout?: string; stderr?: string };
+      stdout = maybeProcessError.stdout || stdout;
+      stderr = maybeProcessError.stderr || stderr;
+      await this.appendCommandResult(logPath, stdout, stderr);
+      await this.appendLog(logPath, `status=failed\nerror=${this.formatErrorForLog(error)}\n`);
+      this.emitStream(streamOptions, "error", this.formatUserFacingError(error, "新建文档"));
+      throw new Error(`${this.formatUserFacingError(error, "新建文档")}。详细日志：${logRelativePath}`);
     } finally {
       await Promise.allSettled([fs.rm(schemaPath, { force: true }), fs.rm(outputPath, { force: true })]);
     }
@@ -465,13 +553,30 @@ export class CodexTextProvider {
     ].join("\n");
   }
 
+  private createDocumentCreationPrompt(instruction: string): string {
+    return [
+      "你是一个资深产品文档作者。",
+      "请根据用户输入，新建一份 Markdown 文档。",
+      "当前工作目录是项目根目录；必须先读取 pages.json，了解项目名称、项目类型和已有文档列表。",
+      "请按需要自行读取 docs/ 下已有相关文档，参考其术语、业务背景、结构、视觉规范、页面规划和功能口径，保持一致。",
+      "不要修改已有文件；只生成新文档的结构化结果。",
+      "如果本次命令通过 -i 附加了参考图片，请结合图片内容理解用户想新增的文档范围。",
+      "最终只返回符合 JSON Schema 的 JSON：title 为文档标题，fileName 为建议的英文 kebab-case Markdown 文件名，content 为完整 Markdown 内容，summary 为生成摘要。",
+      "fileName 只允许文件名，不要包含 docs/ 或其它目录；必须以 .md 结尾。",
+      "",
+      "用户新增文档需求：",
+      instruction
+    ].join("\n");
+  }
+
   private createPagePlanSyncPrompt(pagePlanPath: string): string {
     return [
       "你是一个资深产品信息架构师。",
-      "请根据项目根目录下的页面规划文档和现有 pages.json，输出可写回 pages.json.pages 的完整页面数组。",
+      "请根据项目根目录下的页面规划文档、pages.json 项目索引和现有页面数据目录，输出完整页面数组。",
       "只返回符合 JSON Schema 的 JSON，不要输出 Markdown 或解释性文本。",
       "不要在提示词中依赖内嵌文档内容；请自行读取下面给出的相对路径文件。",
-      "必须读取 pages.json 的 project.type、project.name 和 docs/style.md（如果存在），并保持页面规划与当前项目类型、目标用户和视觉规范一致。",
+      "必须读取 pages.json 的 project.type、project.name、pages[].dataDir 和 docs/style.md（如果存在），并保持页面规划与当前项目类型、目标用户和视觉规范一致。",
+      "如需了解某个旧页面的完整 uiPrompt、图片路径或已有素材，只读取对应 pages/<pageId>/page.json、assets.json、slice-selections.json；不要读取无关页面目录。",
       "需要保留语义稳定的页面 route；route 必须以 / 开头。",
       "每个页面必须包含 name、route、description、uiPrompt。",
       "uiPrompt 用于生成界面图片，必须描述页面布局、关键组件、交互状态、视觉风格、适配平台和响应式/设备适配要点。",
@@ -479,7 +584,8 @@ export class CodexTextProvider {
       "不要输出 imagePath、assetIds、needUpdate 或 assets；这些字段由主进程按现有 pages.json 合并。",
       "",
       `页面规划文档路径：${pagePlanPath}`,
-      "现有页面元信息路径：pages.json",
+      "项目索引路径：pages.json",
+      "页面数据目录：pages/<pageId>/",
       "全局视觉规范路径：docs/style.md"
     ].join("\n");
   }

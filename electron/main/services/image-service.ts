@@ -50,7 +50,7 @@ export class ImageService {
     annotations: PageImageAnnotation[] = [],
     streamOptions: CodexImageStreamOptions = {}
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
 
     if (!page) {
@@ -88,7 +88,7 @@ export class ImageService {
   }
 
   async listPageImageVersions(projectRoot: string, pageId: string): Promise<PageImageVersion[]> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
 
     if (!page) {
@@ -127,7 +127,7 @@ export class ImageService {
     pageId: string,
     streamOptions: CodexImageStreamOptions = {}
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
 
     if (!page) {
@@ -174,7 +174,7 @@ export class ImageService {
     pageId: string,
     streamOptions: CodexImageStreamOptions = {}
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
 
     if (!page) {
@@ -233,7 +233,7 @@ export class ImageService {
     pageId: string,
     imagePath: string
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
 
     if (!page) {
@@ -273,7 +273,7 @@ export class ImageService {
     pageId: string,
     selections: SliceSelectionMeta[]
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
 
     if (!current.pages.some((page) => page.id === pageId)) {
       throw new Error("页面不存在");
@@ -329,7 +329,7 @@ export class ImageService {
     prompt: string,
     streamOptions: CodexImageStreamOptions = {}
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
     const timestamp = nowIso();
     const selectionId = makeId("selection");
@@ -361,7 +361,7 @@ export class ImageService {
     streamOptions: CodexImageStreamOptions = {},
     options: { force?: boolean; prompt?: string; replaceExisting?: boolean } = {}
   ): Promise<ProjectInfo> {
-    const current = await this.projectService.readPagesJson(projectRoot);
+    const current = await this.projectService.ensureSplitProject(projectRoot);
     const page = current.pages.find((item) => item.id === pageId);
 
     if (!page) {

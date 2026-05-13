@@ -6,15 +6,16 @@ import type {
   ProjectIndexEntry,
   ProjectInfo
 } from "../../../src/shared/types";
-import { pagesJsonSchema } from "../../../src/shared/validation";
 import { makeId, nowIso, pathExists } from "../utils/fs";
 import { runProcess } from "../utils/process";
+import { ProjectDataService } from "./project-data-service";
 
 const PAGES_JSON_NAME = "pages.json";
 const IGNORED_EMPTY_DIR_ENTRIES = new Set([".DS_Store"]);
 
 export class ProjectService {
   private readonly indexPath: string;
+  private readonly dataService = new ProjectDataService();
 
   constructor(private readonly userDataDir: string) {
     this.indexPath = path.join(userDataDir, "projects-index.json");
@@ -42,7 +43,7 @@ export class ProjectService {
     const timestamp = nowIso();
     const projectType = input.type || "web";
     const meta: PagesJson = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       project: {
         id: makeId("project"),
         name,
@@ -59,6 +60,7 @@ export class ProjectService {
     await fs.mkdir(path.join(rootDir, "docs"), { recursive: true });
     await fs.mkdir(path.join(rootDir, "assets"), { recursive: true });
     await fs.mkdir(path.join(rootDir, "logs"), { recursive: true });
+    await fs.mkdir(path.join(rootDir, "pages"), { recursive: true });
     await this.writePagesJson(rootDir, meta);
     await this.upsertIndex({
       id: meta.project.id,
@@ -87,18 +89,53 @@ export class ProjectService {
   }
 
   async readPagesJson(rootDir: string): Promise<PagesJson> {
-    const filePath = path.join(path.resolve(rootDir), PAGES_JSON_NAME);
-    const raw = await fs.readFile(filePath, "utf8");
-    return pagesJsonSchema.parse(JSON.parse(raw)) as PagesJson;
+    return this.dataService.readProjectMeta(rootDir);
   }
 
   async writePagesJson(rootDir: string, meta: PagesJson): Promise<void> {
-    pagesJsonSchema.parse(meta);
-    await fs.writeFile(
-      path.join(path.resolve(rootDir), PAGES_JSON_NAME),
-      `${JSON.stringify(meta, null, 2)}\n`,
-      "utf8"
-    );
+    await this.dataService.writeProjectMeta(rootDir, meta);
+  }
+
+  async ensureSplitProject(rootDir: string): Promise<PagesJson> {
+    const meta = await this.readPagesJson(rootDir);
+    await this.writePagesJson(rootDir, meta);
+    return this.readPagesJson(rootDir);
+  }
+
+  async readProject(rootDir: string): Promise<ProjectInfo> {
+    return this.dataService.readProject(rootDir);
+  }
+
+  async writeProject(rootDir: string, meta: PagesJson): Promise<void> {
+    await this.dataService.writeProjectMeta(rootDir, meta);
+  }
+
+  async readPage(rootDir: string, pageId: string) {
+    return this.dataService.readPage(rootDir, pageId);
+  }
+
+  async writePage(rootDir: string, page: PagesJson["pages"][number]): Promise<PagesJson> {
+    return this.dataService.writePage(rootDir, page);
+  }
+
+  async readPageAssets(rootDir: string, pageId: string) {
+    return this.dataService.readPageAssets(rootDir, pageId);
+  }
+
+  async writePageAssets(rootDir: string, pageId: string, assets: PagesJson["assets"]): Promise<PagesJson> {
+    return this.dataService.writePageAssets(rootDir, pageId, assets);
+  }
+
+  async readPageSliceSelections(rootDir: string, pageId: string) {
+    return this.dataService.readPageSliceSelections(rootDir, pageId);
+  }
+
+  async writePageSliceSelections(
+    rootDir: string,
+    pageId: string,
+    selections: NonNullable<PagesJson["sliceSelections"]>
+  ): Promise<PagesJson> {
+    return this.dataService.writePageSliceSelections(rootDir, pageId, selections);
   }
 
   async touchIndex(rootDir: string, meta: PagesJson): Promise<void> {

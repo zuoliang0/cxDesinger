@@ -29,7 +29,8 @@ export type DocumentType =
   | "style-guide"
   | "animation-list"
   | "page-plan"
-  | "feature-list";
+  | "feature-list"
+  | "custom";
 
 export interface DocumentMeta {
   type: DocumentType;
@@ -48,6 +49,17 @@ export interface PageMeta {
   backgroundImagePath?: string;
   needUpdate?: boolean;
   assetIds: string[];
+  dataDir?: string;
+  updatedAt?: string;
+}
+
+export interface PageIndexMeta {
+  id: string;
+  name: string;
+  route: string;
+  description: string;
+  dataDir: string;
+  updatedAt: string;
 }
 
 export interface SelectionRect {
@@ -86,12 +98,19 @@ export interface SliceSelectionMeta {
 }
 
 export interface PagesJson {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   project: ProjectMeta;
   documents: DocumentMeta[];
   pages: PageMeta[];
   assets: AssetMeta[];
   sliceSelections?: SliceSelectionMeta[];
+}
+
+export interface PagesIndexJson {
+  schemaVersion: 2;
+  project: ProjectMeta;
+  documents: DocumentMeta[];
+  pages: PageIndexMeta[];
 }
 
 export interface PlanningPageOutput {
@@ -116,6 +135,13 @@ export interface PlanningOutput {
 }
 
 export interface DocumentRevisionOutput {
+  content: string;
+  summary: string;
+}
+
+export interface DocumentCreationOutput {
+  title: string;
+  fileName: string;
   content: string;
   summary: string;
 }
@@ -174,7 +200,23 @@ export interface ReviseDocumentInput {
   reasoningEffort?: CodexReasoningEffort;
 }
 
+export interface CreateDocumentInput {
+  projectRoot: string;
+  instruction: string;
+  referenceImagePaths?: string[];
+  taskId?: string;
+  model?: CodexModel;
+  reasoningEffort?: CodexReasoningEffort;
+}
+
 export interface ReviseDocumentResult {
+  project: ProjectInfo;
+  documentPath: string;
+  content: string;
+  summary: string;
+}
+
+export interface CreateDocumentResult {
   project: ProjectInfo;
   documentPath: string;
   content: string;

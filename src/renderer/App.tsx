@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, MouseEvent, PointerEvent, ReactNode, RefObject } from "react";
+import type { ClipboardEvent, MouseEvent, PointerEvent, ReactNode, RefObject, WheelEvent } from "react";
 import {
   ArrowLeft,
   Boxes,
@@ -13,8 +13,10 @@ import {
   Image,
   Layers,
   Loader2,
+  Minus,
   Plus,
   RefreshCw,
+  RotateCcw,
   Scissors,
   Send,
   Settings,
@@ -55,6 +57,7 @@ type ActiveCodexTask = {
 };
 type ImageTaskResult = "success" | "error";
 type SliceGenerateMode = "pending" | "force";
+type DocumentMode = "discussion" | "edit";
 type PageAssetPreview =
   | { kind: "slice"; assetId: string; dataUrl: string }
   | { kind: "background"; path: string; dataUrl: string };
@@ -546,7 +549,12 @@ function PlanningView({
   const [referenceImages, setReferenceImages] = useState<ReferenceImageMeta[]>([]);
   const [selectedModel, setSelectedModel] = useState<CodexModel>("gpt-5.5");
   const [selectedDoc, setSelectedDoc] = useState<DocumentMeta | null>(project.meta.documents[0] || null);
+  const [createDocumentMode, setCreateDocumentMode] = useState(false);
   const [docContent, setDocContent] = useState("");
+  const [docMode, setDocMode] = useState<DocumentMode>("discussion");
+  const [docDraft, setDocDraft] = useState("");
+  const [docMtimeMs, setDocMtimeMs] = useState<number | undefined>();
+  const [docSaving, setDocSaving] = useState(false);
   const [activeTask, setActiveTask] = useState<{
     id: string;
     label: string;
@@ -588,6 +596,10 @@ function PlanningView({
 
   useEffect(() => {
     setSelectedDoc((current) => {
+      if (createDocumentMode) {
+        return null;
+      }
+
       if (current) {
         const stillExists = project.meta.documents.find((doc) => doc.path === current.path);
 
@@ -598,7 +610,7 @@ function PlanningView({
 
       return project.meta.documents[0] || null;
     });
-  }, [project.meta.documents]);
+  }, [createDocumentMode, project.meta.documents]);
 
   useEffect(() => {
     const unsubscribe = api.onAiStreamEvent((event) => {
@@ -619,14 +631,26 @@ function PlanningView({
   useEffect(() => {
     if (!selectedDoc) {
       setDocContent("");
+      setDocDraft("");
+      setDocMtimeMs(undefined);
       return;
     }
 
     api
-      .readDocument({ projectRoot: project.rootDir, relativePath: selectedDoc.path })
-      .then(setDocContent)
-      .catch(() => setDocContent(""));
+      .readProjectFile({ projectRoot: project.rootDir, relativePath: selectedDoc.path })
+      .then((file) => {
+        setDocContent(file.content);
+        setDocDraft(file.content);
+        setDocMtimeMs(file.mtimeMs);
+      })
+      .catch(() => {
+        setDocContent("");
+        setDocDraft("");
+        setDocMtimeMs(undefined);
+      });
   }, [project.rootDir, selectedDoc]);
+
+  const docDirty = selectedDoc ? docDraft !== docContent : false;
 
   async function sendRequirement() {
     const instruction = requirement.trim();
@@ -637,7 +661,14 @@ function PlanningView({
 
     const taskId = createTaskId();
     const hasSelectedDocument = Boolean(selectedDoc);
-    const nextTask = hasSelectedDocument
+    const nextTask = createDocumentMode
+      ? {
+          id: taskId,
+          label: t("新建文档"),
+          scope: "document" as const,
+          startedAt: Date.now()
+        }
+      : hasSelectedDocument
       ? {
           id: taskId,
           label: t("修改当前文档：{path}", { path: selectedDoc?.path || "" }),
@@ -658,7 +689,22 @@ function PlanningView({
     onError("");
 
     try {
-      if (hasSelectedDocument && selectedDoc) {
+      if (createDocumentMode) {
+        const result = await api.createDocument({
+          taskId,
+          projectRoot: project.rootDir,
+          instruction,
+          referenceImagePaths: referenceImages.map((image) => image.path),
+          model: selectedModel,
+          reasoningEffort: "high"
+        });
+
+        onProjectChange(result.project);
+        setDocContent(result.content);
+        setSelectedDoc(result.project.meta.documents.find((doc) => doc.path === result.documentPath) || null);
+        setCreateDocumentMode(false);
+        setReferenceImages([]);
+      } else if (hasSelectedDocument && selectedDoc) {
         const result = await api.reviseDocument({
           taskId,
           projectRoot: project.rootDir,
@@ -689,6 +735,83 @@ function PlanningView({
       setRequirement((current) => current || instruction);
     } finally {
       finishActiveTask(taskId);
+    }
+  }
+
+  function startCreateDocument() {
+    if (activeTask) {
+      return;
+    }
+
+    if (!confirmDiscardDocumentChanges()) {
+      return;
+    }
+
+    setCreateDocumentMode(true);
+    setSelectedDoc(null);
+    setDocMode("discussion");
+    setDocContent("");
+    setDocDraft("");
+    setDocMtimeMs(undefined);
+    setRequirement("");
+    setReferenceImages([]);
+    setStreamEvents([]);
+    onError("");
+  }
+
+  function confirmDiscardDocumentChanges(): boolean {
+    return !docDirty || window.confirm(t("当前文档有未保存修改，确认离开吗？"));
+  }
+
+  function selectDocument(doc: DocumentMeta) {
+    if (!confirmDiscardDocumentChanges()) {
+      return;
+    }
+
+    setCreateDocumentMode(false);
+    setSelectedDoc(doc);
+  }
+
+  async function reloadDocument() {
+    if (!selectedDoc || docSaving) {
+      return;
+    }
+
+    try {
+      const file = await api.readProjectFile({ projectRoot: project.rootDir, relativePath: selectedDoc.path });
+      setDocContent(file.content);
+      setDocDraft(file.content);
+      setDocMtimeMs(file.mtimeMs);
+      onError("");
+    } catch (error) {
+      onError(toErrorMessage(error));
+    }
+  }
+
+  async function saveDocumentEdit() {
+    if (!selectedDoc || docSaving || activeTask) {
+      return;
+    }
+
+    setDocSaving(true);
+    onError("");
+
+    try {
+      const content = docDraft.endsWith("\n") ? docDraft : `${docDraft}\n`;
+      const result = await api.writeProjectFile({
+        projectRoot: project.rootDir,
+        relativePath: selectedDoc.path,
+        content,
+        expectedMtimeMs: docMtimeMs
+      });
+
+      setDocContent(content);
+      setDocDraft(content);
+      setDocMtimeMs(result.mtimeMs);
+    } catch (error) {
+      onError(toErrorMessage(error));
+    } finally {
+      setDocSaving(false);
     }
   }
 
@@ -779,9 +902,20 @@ function PlanningView({
   return (
     <div className="split-layout">
       <aside className="sidebar">
-        <div className="panel-title">
-          <FileText size={16} />
-          <span>{t("文档")}</span>
+        <div className="panel-title document-panel-title">
+          <span className="panel-title-label">
+            <FileText size={16} />
+            <span>{t("文档")}</span>
+          </span>
+          <button
+            className="icon-button compact"
+            onClick={startCreateDocument}
+            disabled={Boolean(activeTask)}
+            title={t("新增文档")}
+            type="button"
+          >
+            <Plus size={15} />
+          </button>
         </div>
         <div className="nav-list">
           {project.meta.documents.length === 0 ? (
@@ -789,9 +923,9 @@ function PlanningView({
           ) : (
             project.meta.documents.map((doc) => (
               <button
-                className={selectedDoc?.path === doc.path ? "nav-row active" : "nav-row"}
+                className={selectedDoc?.path === doc.path && !createDocumentMode ? "nav-row active" : "nav-row"}
                 key={doc.path}
-                onClick={() => setSelectedDoc(doc)}
+                onClick={() => selectDocument(doc)}
               >
                 <span>{doc.title}</span>
                 <small>{doc.path}</small>
@@ -802,8 +936,49 @@ function PlanningView({
       </aside>
       <section className="main-panel planning-panel">
         <div className="document-preview">
-          {selectedDoc?.type === "page-plan" ? (
+          {selectedDoc ? (
             <div className="document-toolbar">
+              <div className="document-mode-switch">
+                <button
+                  className={docMode === "discussion" ? "toolbar-button active" : "toolbar-button"}
+                  onClick={() => setDocMode("discussion")}
+                  disabled={docSaving}
+                  type="button"
+                >
+                  {t("讨论")}
+                </button>
+                <button
+                  className={docMode === "edit" ? "toolbar-button active" : "toolbar-button"}
+                  onClick={() => setDocMode("edit")}
+                  disabled={docSaving}
+                  type="button"
+                >
+                  {t("编辑")}
+                </button>
+              </div>
+              {docMode === "edit" ? (
+                <div className="document-edit-actions">
+                  <button
+                    className="toolbar-button"
+                    onClick={reloadDocument}
+                    disabled={docSaving || activeTask !== null}
+                    type="button"
+                  >
+                    <RefreshCw size={15} />
+                    {t("重新加载")}
+                  </button>
+                  <button
+                    className="toolbar-button active"
+                    onClick={saveDocumentEdit}
+                    disabled={docSaving || activeTask !== null || !docDirty}
+                    type="button"
+                  >
+                    <Check size={15} />
+                    {docSaving ? t("保存中") : t("保存文档")}
+                  </button>
+                </div>
+              ) : null}
+              {selectedDoc.type === "page-plan" && docMode === "discussion" ? (
               <button
                 className="toolbar-button sync-page-plan-button"
                 onClick={syncPagePlan}
@@ -812,14 +987,25 @@ function PlanningView({
                 <RefreshCw size={16} />
                 {t("同步到 pages.json")}
               </button>
+              ) : null}
             </div>
           ) : null}
-          {selectedDoc ? (
+          {selectedDoc && docMode === "edit" ? (
+            <textarea
+              className="document-editor"
+              value={docDraft}
+              onChange={(event) => setDocDraft(event.target.value)}
+              disabled={docSaving}
+              spellCheck={false}
+            />
+          ) : selectedDoc ? (
             <MarkdownDocument
               content={docContent}
               documentPath={selectedDoc.path}
               onAddComment={addDocumentComment}
             />
+          ) : createDocumentMode ? (
+            <div className="empty-state compact">{t("描述新文档需求，AI 会参考已有文档生成")}</div>
           ) : (
             <div className="empty-state compact">{t("暂无文档")}</div>
           )}
@@ -840,7 +1026,13 @@ function PlanningView({
             <textarea
               value={requirement}
               onChange={(event) => setRequirement(event.target.value)}
-              placeholder={selectedDoc ? t("描述对当前文档的修改意见") : t("描述要创建的产品和规划任务")}
+              placeholder={
+                createDocumentMode
+                  ? t("描述要新增的文档内容")
+                  : selectedDoc
+                    ? t("描述对当前文档的修改意见")
+                    : t("描述要创建的产品和规划任务")
+              }
             />
             <label className="model-picker">
               <span>{t("模型")}</span>
@@ -1100,6 +1292,9 @@ function PagesView({
   const [singleSliceNote, setSingleSliceNote] = useState("");
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<SelectionRect | null>(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [panStart, setPanStart] = useState<{ clientX: number; clientY: number; x: number; y: number } | null>(null);
   const [imageRenderInfo, setImageRenderInfo] = useState<{
     width: number;
     height: number;
@@ -1107,6 +1302,7 @@ function PagesView({
     naturalHeight: number;
   } | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const imageStageRef = useRef<HTMLDivElement | null>(null);
   const imageStreamEndRef = useRef<HTMLDivElement | null>(null);
   const selectedSliceItemRef = useRef<HTMLDivElement | null>(null);
 
@@ -1189,6 +1385,7 @@ function PagesView({
     setPageAnnotations([]);
     setAssetPreview(null);
     setCheckedSliceSelectionIds([]);
+    resetImageViewport();
   }, [selectedPage?.id, selectedPage?.uiPrompt]);
 
   useEffect(() => {
@@ -1450,8 +1647,7 @@ function PagesView({
       return;
     }
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const naturalSelection = toNaturalSelection(selection, rect, imageRef.current);
+    const naturalSelection = toNaturalSelection(selection, getImageDisplayedSize(imageRef.current), imageRef.current);
 
     if (naturalSelection.width < 8 || naturalSelection.height < 8) {
       return;
@@ -1496,8 +1692,7 @@ function PagesView({
       return;
     }
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const naturalSelection = toNaturalSelection(displaySelection, rect, imageRef.current);
+    const naturalSelection = toNaturalSelection(displaySelection, getImageDisplayedSize(imageRef.current), imageRef.current);
 
     if (naturalSelection.width < 8 || naturalSelection.height < 8) {
       return;
@@ -1544,8 +1739,11 @@ function PagesView({
       return;
     }
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const point = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
+    const point = getImageLocalPoint(event);
+
+    if (!point) {
+      return;
+    }
 
     if (!dragStart) {
       setDragStart(point);
@@ -1566,6 +1764,99 @@ function PagesView({
         createSliceSelection(nextSelection).catch((err) => onError(toErrorMessage(err)));
       }
     }
+  }
+
+  function getImageLocalPoint(event: PointerEvent<HTMLDivElement>): { x: number; y: number } | null {
+    if (!imageRef.current) {
+      return null;
+    }
+
+    const rect = imageRef.current.getBoundingClientRect();
+    const scale = imageZoom || 1;
+
+    return clampPoint(
+      (event.clientX - rect.left) / scale,
+      (event.clientY - rect.top) / scale,
+      {
+        width: imageRef.current.clientWidth,
+        height: imageRef.current.clientHeight
+      }
+    );
+  }
+
+  function resetImageViewport() {
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
+    setPanStart(null);
+  }
+
+  function applyImageZoom(nextZoom: number, anchor?: { clientX: number; clientY: number }) {
+    if (!imageStageRef.current) {
+      setImageZoom(clampZoom(nextZoom));
+      return;
+    }
+
+    const clampedZoom = clampZoom(nextZoom);
+    const stageRect = imageStageRef.current.getBoundingClientRect();
+    const anchorX = anchor ? anchor.clientX - stageRect.left : stageRect.width / 2;
+    const anchorY = anchor ? anchor.clientY - stageRect.top : stageRect.height / 2;
+    const localX = (anchorX - imagePan.x) / imageZoom;
+    const localY = (anchorY - imagePan.y) / imageZoom;
+
+    setImageZoom(clampedZoom);
+    setImagePan({
+      x: anchorX - localX * clampedZoom,
+      y: anchorY - localY * clampedZoom
+    });
+  }
+
+  function handleImageWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!imageData || assetPreview) {
+      return;
+    }
+
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    applyImageZoom(imageZoom * factor, { clientX: event.clientX, clientY: event.clientY });
+  }
+
+  function startImagePan(event: PointerEvent<HTMLDivElement>) {
+    if (selectionMode || annotationMode || assetPreview || !imageData) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+
+    if (target.closest("button,input,textarea,select")) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPanStart({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: imagePan.x,
+      y: imagePan.y
+    });
+  }
+
+  function updateImagePan(event: PointerEvent<HTMLDivElement>) {
+    if (!panStart || selectionMode || annotationMode) {
+      return;
+    }
+
+    setImagePan({
+      x: panStart.x + event.clientX - panStart.clientX,
+      y: panStart.y + event.clientY - panStart.clientY
+    });
+  }
+
+  function finishImagePan(event: PointerEvent<HTMLDivElement>) {
+    if (panStart) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    setPanStart(null);
   }
 
   const pageAssets = selectedPage
@@ -1913,29 +2204,83 @@ function PagesView({
         </div>
 
         <div
+          ref={imageStageRef}
           className={[
             "image-stage",
             selectionMode || annotationMode ? "selecting" : "",
+            !selectionMode && !annotationMode && imageData && !assetPreview ? "pannable" : "",
+            panStart ? "panning" : "",
             assetPreview ? "asset-preview-stage" : ""
           ]
             .filter(Boolean)
             .join(" ")}
+          onWheel={handleImageWheel}
           onPointerDown={(event) => {
-            if (!assetPreview) {
+            if (selectionMode || annotationMode) {
               updateSelectionDraft(event);
+              return;
             }
+
+            startImagePan(event);
           }}
           onPointerMove={(event) => {
-            if (!assetPreview && dragStart) {
-              updateSelectionDraft(event);
+            if (selectionMode || annotationMode) {
+              if (dragStart) {
+                updateSelectionDraft(event);
+              }
+              return;
             }
+
+            updateImagePan(event);
+          }}
+          onPointerLeave={(event) => {
+            if (selectionMode || annotationMode) {
+              if (dragStart) {
+                updateSelectionDraft(event, true);
+              }
+              return;
+            }
+
+            finishImagePan(event);
           }}
           onPointerUp={(event) => {
-            if (!assetPreview) {
+            if (selectionMode || annotationMode) {
               updateSelectionDraft(event, true);
+              return;
             }
+
+            finishImagePan(event);
           }}
         >
+          {imageData && !assetPreview ? (
+            <div className="image-viewport-controls">
+              <button
+                className="icon-button compact"
+                onClick={() => applyImageZoom(imageZoom * 1.2)}
+                title={t("放大")}
+                type="button"
+              >
+                <Plus size={15} />
+              </button>
+              <button
+                className="icon-button compact"
+                onClick={() => applyImageZoom(imageZoom / 1.2)}
+                title={t("缩小")}
+                type="button"
+              >
+                <Minus size={15} />
+              </button>
+              <button
+                className="icon-button compact"
+                onClick={resetImageViewport}
+                title={t("重置视图")}
+                type="button"
+              >
+                <RotateCcw size={15} />
+              </button>
+              <span>{Math.round(imageZoom * 100)}%</span>
+            </div>
+          ) : null}
           {assetPreview ? (
             <div className="asset-preview-view">
               <div className="asset-preview-toolbar">
@@ -1953,7 +2298,12 @@ function PagesView({
 	              </div>
             </div>
           ) : imageData ? (
-            <div className="image-wrap">
+            <div
+              className="image-wrap"
+              style={{
+                transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})`
+              }}
+            >
               <img
                 ref={imageRef}
                 src={imageData}
@@ -2412,7 +2762,7 @@ function Dialog({
 
 function toNaturalSelection(
   selection: SelectionRect,
-  displayedRect: DOMRect,
+  displayedRect: { width: number; height: number },
   image: HTMLImageElement
 ): SelectionRect {
   return selectionToNatural(
@@ -2420,6 +2770,13 @@ function toNaturalSelection(
     { width: displayedRect.width, height: displayedRect.height },
     { width: image.naturalWidth, height: image.naturalHeight }
   );
+}
+
+function getImageDisplayedSize(image: HTMLImageElement): { width: number; height: number } {
+  return {
+    width: image.clientWidth,
+    height: image.clientHeight
+  };
 }
 
 function naturalToDisplaySelection(
@@ -2449,11 +2806,15 @@ function normalizeRect(
   };
 }
 
-function clampPoint(x: number, y: number, rect: DOMRect): { x: number; y: number } {
+function clampPoint(x: number, y: number, rect: { width: number; height: number }): { x: number; y: number } {
   return {
     x: Math.min(Math.max(x, 0), rect.width),
     y: Math.min(Math.max(y, 0), rect.height)
   };
+}
+
+function clampZoom(value: number): number {
+  return Math.min(Math.max(value, 0.25), 4);
 }
 
 function splitLines(value: string): string[] {
