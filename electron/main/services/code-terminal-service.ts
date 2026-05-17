@@ -1,9 +1,6 @@
-import { constants } from "node:fs";
 import fs from "node:fs/promises";
-import path from "node:path";
-import { execFile, spawn as spawnChild } from "node:child_process";
+import { spawn as spawnChild } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { promisify } from "node:util";
 import type { WebContents } from "electron";
 import type { IPty } from "node-pty";
 import { spawn as spawnPty } from "node-pty";
@@ -13,8 +10,7 @@ import type {
   ResizeCodeTerminalInput,
   WriteCodeTerminalInput
 } from "../../../src/shared/types";
-
-const execFileAsync = promisify(execFile);
+import { createCodexProcessEnv, resolveCodexCommand } from "../utils/codex-command";
 
 interface TerminalSession {
   terminal: TerminalProcess;
@@ -41,7 +37,7 @@ export class CodeTerminalService {
     this.closeTerminal(input.terminalId);
 
     const env = this.createTerminalEnv();
-    const command = await this.resolveCommand(settings.codex.command || "codex", env.PATH || "");
+    const command = await resolveCodexCommand(settings.codex.command || "codex", env.PATH || "");
     const terminal = this.spawnTerminal(command, settings.codex.args, input.projectRoot, env, {
       cols: input.cols || 100,
       rows: input.rows || 30
@@ -118,78 +114,10 @@ export class CodeTerminalService {
   }
 
   private createTerminalEnv(): NodeJS.ProcessEnv {
-    const fallbackPaths = [
-      "/usr/local/bin",
-      "/usr/bin",
-      "/bin",
-      "/usr/sbin",
-      "/sbin"
-    ];
-    const pathValue = [...fallbackPaths, process.env.PATH || ""].filter(Boolean).join(":");
-
     return {
-      ...process.env,
-      PATH: pathValue,
+      ...createCodexProcessEnv(),
       TERM: "xterm-256color"
     };
-  }
-
-  private async resolveCommand(command: string, pathValue: string): Promise<string> {
-    if (command.includes(path.sep)) {
-      await this.assertExecutable(command);
-      return command;
-    }
-
-    const shellResolved = await this.resolveWithLoginShell(command);
-
-    if (shellResolved) {
-      return shellResolved;
-    }
-
-    for (const directory of pathValue.split(":").filter(Boolean)) {
-      const candidate = path.join(directory, command);
-
-      if (await this.isExecutable(candidate)) {
-        return candidate;
-      }
-    }
-
-    throw new Error(`找不到 Codex 可执行文件：${command}。请在设置中填写完整路径，或先在系统终端确认 command -v ${command} 可以找到。`);
-  }
-
-  private async resolveWithLoginShell(command: string): Promise<string | null> {
-    const shell = process.env.SHELL || "/bin/zsh";
-    const quotedCommand = command.replace(/'/g, "'\\''");
-
-    try {
-      const { stdout } = await execFileAsync(shell, ["-lc", `command -v '${quotedCommand}'`], {
-        timeout: 3000
-      });
-      const resolved = stdout.trim().split("\n")[0];
-
-      if (resolved && (await this.isExecutable(resolved))) {
-        return resolved;
-      }
-    } catch {
-      return null;
-    }
-
-    return null;
-  }
-
-  private async assertExecutable(command: string): Promise<void> {
-    if (!(await this.isExecutable(command))) {
-      throw new Error(`Codex 可执行文件不可用：${command}`);
-    }
-  }
-
-  private async isExecutable(command: string): Promise<boolean> {
-    try {
-      await fs.access(command, constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private spawnTerminal(

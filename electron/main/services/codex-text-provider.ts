@@ -18,6 +18,7 @@ import {
   pagePlanSyncOutputSchema,
   planningOutputSchema
 } from "../../../src/shared/validation";
+import { createMissingCodexCliMessage, createCodexProcessEnv, resolveCodexCommand } from "../utils/codex-command";
 import { runProcess } from "../utils/process";
 
 const PLANNING_OUTPUT_JSON_SCHEMA = {
@@ -149,6 +150,8 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -157,7 +160,7 @@ export class CodexTextProvider {
     await this.appendLog(logPath, [
       `time=${new Date().toISOString()}`,
       `cwd=${projectRoot}`,
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -168,9 +171,11 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 生成结构化规划");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: this.createPlanningPrompt(requirement, projectType),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -224,6 +229,8 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -233,7 +240,7 @@ export class CodexTextProvider {
       `time=${new Date().toISOString()}`,
       `cwd=${projectRoot}`,
       `document=${documentPath}`,
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -244,9 +251,11 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 修改当前文档");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: this.createDocumentRevisionPrompt(documentPath, instruction),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -299,6 +308,8 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -307,7 +318,7 @@ export class CodexTextProvider {
     await this.appendLog(logPath, [
       `time=${new Date().toISOString()}`,
       `cwd=${projectRoot}`,
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -318,9 +329,11 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 生成新文档");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: this.createDocumentCreationPrompt(instruction),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -373,6 +386,8 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -383,7 +398,7 @@ export class CodexTextProvider {
       `cwd=${projectRoot}`,
       `pagePlan=${pagePlanPath}`,
       "pagesJson=pages.json",
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -394,9 +409,11 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 提取页面规划");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: this.createPagePlanSyncPrompt(pagePlanPath),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -523,6 +540,10 @@ export class CodexTextProvider {
       "需要覆盖：沟通记录、PRD、功能规划、技术方案、全局视觉风格规范、页面规划、功能清单。",
       "documents.styleGuide 将写入 docs/style.md，作为后续所有页面图片生成的统一视觉规范。",
       "styleGuide 必须明确：目标用户与情绪、画幅与布局密度、色彩系统、字体层级、组件形态、图标/插画风格、动效/状态表达、禁用风格和跨页面一致性规则。",
+      "默认 UI 与技术栈规则：如果用户没有明确指定 UI 框架、设计库或技术栈，WEB/桌面端/管理后台默认采用 React + TypeScript + Vite + Ant Design；移动 APP/H5 默认采用 React + TypeScript + Vite + Ant Design Mobile；默认使用执行时可获得的 Ant Design 最新稳定版本（当前官方文档参考版本为 6.3.7），若项目依赖已有更高稳定版本则以项目依赖为准。",
+      "默认设计规范规则：如果用户没有明确指定其它设计体系，styleGuide 和所有 uiPrompt 必须遵守 Ant Design 官方设计规范 https://ant.design/docs/spec/overview-cn/ 的核心规则：服务企业级业务，优先保持确定性、一致性、可复用和研发效率；使用 Ant Design 的全局样式体系组织色彩、布局、字体、图标、暗黑模式与阴影；页面模式要优先参考反馈、导航、数据录入、数据展示、数据格式、文案、按钮、数据列表等全局规则；布局与交互要体现亲密性、对齐、对比、重复、直截了当、足不出户、简化交互、提供邀请、巧用过渡、即时反应等原则。",
+      "默认实现方案规则：技术方案中需要明确 Ant Design/Ant Design Mobile 的组件选型、主题 token、表单/表格/列表/反馈/导航/空状态/异常状态的实现方式；不要在未获用户要求时引入与 Ant Design 冲突的重型 UI 库或一套完全不同的视觉语言。",
+      "代码实现阶段规则：技术方案中必须注明，后续使用 Codex 编写 Ant Design 代码时，应先阅读并理解 https://ant.design/llms-full.txt；组件 API、Props、Design Token、Semantic DOM、版本说明和示例应以该官方 LLM 文档为准，不要凭记忆使用过期 API。",
       projectType === "app"
         ? "这是 APP 项目，documents.animationList 必须生成并写入 docs/animation-list.md，内容要覆盖页面转场、组件动效、手势反馈、加载/空/错误状态动画、关键业务流程动效和开发实现注意事项。"
         : "这是 WEB 项目，documents.animationList 仍必须作为字段返回；除非用户明确要求动效清单，否则请返回空字符串。",
@@ -676,7 +697,11 @@ export class CodexTextProvider {
       return `${action}失败：Codex 调用超时`;
     }
 
-    if (text.includes("output-last-message") || text.includes("ENOENT")) {
+    if (text.includes("找不到 Codex 可执行文件") || text.includes("spawn codex ENOENT")) {
+      return `${action}失败：${createMissingCodexCliMessage(this.options.command)}`;
+    }
+
+    if (text.includes("output-last-message")) {
       return `${action}失败：Codex 未返回有效结构化结果`;
     }
 

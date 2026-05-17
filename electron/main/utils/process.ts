@@ -5,6 +5,7 @@ export interface RunProcessInput {
   args: string[];
   stdin?: string;
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
   timeoutMs: number;
   signal?: AbortSignal;
   onStdout?: (chunk: string) => void;
@@ -32,6 +33,7 @@ export function runProcess(input: RunProcessInput): Promise<RunProcessResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
+      env: input.env,
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
       windowsHide: true

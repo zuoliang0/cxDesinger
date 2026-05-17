@@ -14,6 +14,26 @@ async function makeCodexShim(fixturePath: string): Promise<string> {
 }
 
 describe("CodexTextProvider", () => {
+  it("uses Ant Design as the default UI and design system in planning prompts", () => {
+    const provider = new CodexTextProvider({
+      command: process.execPath,
+      args: [],
+      timeoutMs: 5_000
+    });
+    const prompt = (provider as unknown as {
+      createPlanningPrompt: (requirement: string, projectType: "web" | "app") => string;
+    }).createPlanningPrompt("做一个设备管理系统", "web");
+
+    expect(prompt).toContain("React + TypeScript + Vite + Ant Design");
+    expect(prompt).toContain("最新稳定版本");
+    expect(prompt).toContain("6.3.7");
+    expect(prompt).toContain("https://ant.design/docs/spec/overview-cn/");
+    expect(prompt).toContain("https://ant.design/llms-full.txt");
+    expect(prompt).toContain("组件 API、Props、Design Token、Semantic DOM");
+    expect(prompt).toContain("亲密性、对齐、对比、重复");
+    expect(prompt).toContain("反馈、导航、数据录入、数据展示");
+  });
+
   it("parses structured planning output from codex exec", async () => {
     const provider = new CodexTextProvider({
       command: process.execPath,

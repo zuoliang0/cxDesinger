@@ -14,6 +14,7 @@ import type {
   SliceSelectionMeta
 } from "../../../src/shared/types";
 import { pathExists, toProjectRelativePath } from "../utils/fs";
+import { createMissingCodexCliMessage, createCodexProcessEnv, resolveCodexCommand } from "../utils/codex-command";
 import { runProcess } from "../utils/process";
 
 const CODEX_PAGE_IMAGE_OUTPUT_JSON_SCHEMA = {
@@ -301,6 +302,8 @@ export class CodexImageProvider {
       outputMessagePath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -320,7 +323,7 @@ export class CodexImageProvider {
       `cwd=${task.projectRoot}`,
       `kind=${task.kind}`,
       `output=${relativeOutputPath}`,
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(task.projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -331,9 +334,11 @@ export class CodexImageProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 生成图片文件");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: task.prompt,
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -402,6 +407,8 @@ export class CodexImageProvider {
       outputMessagePath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -413,7 +420,7 @@ export class CodexImageProvider {
       `cwd=${params.projectRoot}`,
       "kind=slice-assets",
       `outputs=${relativeOutputPaths.join(", ")}`,
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(params.projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -424,10 +431,12 @@ export class CodexImageProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 批量生成切图素材");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const prompt = this.createSliceAssetsPrompt(params);
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: prompt,
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -512,6 +521,8 @@ export class CodexImageProvider {
       outputMessagePath,
       "-"
     ];
+    const env = createCodexProcessEnv();
+    let command = this.options.command;
     let stdout = "";
     let stderr = "";
 
@@ -522,7 +533,7 @@ export class CodexImageProvider {
       `cwd=${params.projectRoot}`,
       "kind=slice-identification",
       `source=${params.sourceImagePath}`,
-      `command=${this.options.command}`,
+      `command=${command}`,
       `args=${args.join(" ")}`,
       `referenceImages=${this.normalizeReferenceImagePaths(params.projectRoot, streamOptions.referenceImagePaths).join(", ") || "(none)"}`,
       "",
@@ -533,9 +544,11 @@ export class CodexImageProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 识别可切图组件");
+      command = await resolveCodexCommand(this.options.command, env.PATH || "");
       const result = await runProcess({
-        command: this.options.command,
+        command,
         args,
+        env,
         stdin: prompt,
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -958,6 +971,10 @@ export class CodexImageProvider {
 
     if (text.includes("命令执行超时")) {
       return "图片生成失败：Codex 调用超时";
+    }
+
+    if (text.includes("找不到 Codex 可执行文件") || text.includes("spawn codex ENOENT")) {
+      return `图片生成失败：${createMissingCodexCliMessage(this.options.command)}`;
     }
 
     if (text.includes("未生成有效图片文件")) {
