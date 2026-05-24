@@ -2083,9 +2083,20 @@ function PagesView({
   return (
     <div className="split-layout">
       <aside className="sidebar">
-        <div className="panel-title">
-          <Layers size={16} />
-          <span>{t("页面")}</span>
+        <div className="panel-title document-panel-title">
+          <span className="panel-title-label">
+            <Layers size={16} />
+            <span>{t("页面")}</span>
+          </span>
+          <button
+            className="icon-button compact"
+            onClick={refreshPages}
+            disabled={Boolean(activeImageTask)}
+            title={t("刷新页面数据")}
+            type="button"
+          >
+            <RefreshCw size={15} />
+          </button>
         </div>
         <div className="nav-list">
           {project.meta.pages.length === 0 ? (
@@ -2125,16 +2136,6 @@ function PagesView({
             <span>{selectedPage?.route || ""}</span>
           </div>
           <div className="toolbar-group">
-            <button
-              className="toolbar-button"
-              onClick={refreshPages}
-              disabled={Boolean(activeImageTask)}
-              title={t("刷新页面数据")}
-              type="button"
-            >
-              <RefreshCw size={16} />
-              {t("刷新")}
-            </button>
             {selectedPage?.needUpdate ? (
               <div className="page-update-hint">
                 <RefreshCw size={15} />

@@ -389,6 +389,7 @@ export interface WriteProjectFileResult {
 export interface CreateCodeTerminalInput {
   projectRoot: string;
   terminalId: string;
+  resumeLast?: boolean;
   cols?: number;
   rows?: number;
 }

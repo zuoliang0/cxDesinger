@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { spawn as spawnChild } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { WebContents } from "electron";
@@ -38,7 +39,8 @@ export class CodeTerminalService {
 
     const env = this.createTerminalEnv();
     const command = await resolveCodexCommand(settings.codex.command || "codex", env.PATH || "");
-    const terminal = this.spawnTerminal(command, settings.codex.args, input.projectRoot, env, {
+    const args = this.createTerminalArgs(command, settings.codex.args, Boolean(input.resumeLast));
+    const terminal = this.spawnTerminal(command, args, input.projectRoot, env, {
       cols: input.cols || 100,
       rows: input.rows || 30
     });
@@ -118,6 +120,22 @@ export class CodeTerminalService {
       ...createCodexProcessEnv(),
       TERM: "xterm-256color"
     };
+  }
+
+  private createTerminalArgs(command: string, args: string[], resumeLast: boolean): string[] {
+    if (!resumeLast || !this.isCodexCommand(command)) {
+      return args;
+    }
+
+    if (args[0] === "resume") {
+      return args;
+    }
+
+    return ["resume", "--last", ...args];
+  }
+
+  private isCodexCommand(command: string): boolean {
+    return path.basename(command).toLowerCase() === "codex";
   }
 
   private spawnTerminal(

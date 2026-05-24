@@ -269,6 +269,7 @@ export function CodeWorkspace({
                     <CodexTerminal
                       projectRoot={project.rootDir}
                       terminalId={tab.terminalId}
+                      resumeLast={tab.id === HOME_TAB.id}
                       active={active && tab.id === activeTab.id}
                       onError={onError}
                     />
@@ -356,11 +357,13 @@ function FileTreeNode({
 function CodexTerminal({
   projectRoot,
   terminalId,
+  resumeLast,
   active,
   onError
 }: {
   projectRoot: string;
   terminalId: string;
+  resumeLast: boolean;
   active: boolean;
   onError: (message: string) => void;
 }) {
@@ -413,6 +416,7 @@ function CodexTerminal({
       .createCodeTerminal({
         projectRoot,
         terminalId: sessionTerminalIdRef.current,
+        resumeLast,
         cols: terminal.cols,
         rows: terminal.rows
       })
@@ -434,7 +438,7 @@ function CodexTerminal({
       terminal.dispose();
       api.closeCodeTerminal({ terminalId: sessionTerminalIdRef.current }).catch(() => undefined);
     };
-  }, [projectRoot, terminalId]);
+  }, [projectRoot, terminalId, resumeLast]);
 
   useEffect(() => {
     if (active) {
