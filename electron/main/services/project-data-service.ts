@@ -210,17 +210,8 @@ export class ProjectDataService {
   private async writePageBundle(projectRoot: string, page: PageMeta, meta: PagesJson): Promise<void> {
     const dataDir = page.dataDir || this.defaultPageDataDir(page.id);
     const absoluteDataDir = this.resolveDataDir(projectRoot, dataDir);
-    const pageData = {
-      id: page.id,
-      name: page.name,
-      route: page.route,
-      description: page.description,
-      uiPrompt: page.uiPrompt,
-      ...(page.imagePath ? { imagePath: page.imagePath } : {}),
-      ...(page.backgroundImagePath ? { backgroundImagePath: page.backgroundImagePath } : {}),
-      ...(page.needUpdate ? { needUpdate: page.needUpdate } : {}),
-      assetIds: page.assetIds
-    };
+    const pageData = { ...page };
+    delete pageData.dataDir;
     const pageAssets = meta.assets.filter((asset) => asset.pageId === page.id);
     const pageSelections = (meta.sliceSelections || []).filter((selection) => selection.pageId === page.id);
 

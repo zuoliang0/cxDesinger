@@ -1895,6 +1895,35 @@ function PagesView({
     ? assetPreview.path
     : selectedPreviewAsset?.path || "";
 
+  async function refreshPages() {
+    if (activeImageTask) {
+      return;
+    }
+
+    try {
+      const refreshedProject = await api.openProject(project.rootDir);
+      const nextSelectedPage =
+        refreshedProject.meta.pages.find((page) => page.id === selectedPageId) ||
+        refreshedProject.meta.pages[0];
+
+      onProjectChange(refreshedProject);
+      setSelectedPageId(nextSelectedPage?.id || "");
+      setAssetPreview(null);
+      setSelectionMode(false);
+      setAnnotationMode(false);
+      setAnnotationPopover(null);
+      setDragStart(null);
+      setDragSelection(null);
+      setContextMenu(null);
+      setSingleSliceNote("");
+      resetImageViewport();
+      onError("");
+      onNotice(t("页面数据已刷新"));
+    } catch (error) {
+      onError(toErrorMessage(error));
+    }
+  }
+
   function updateImageRenderInfo() {
     if (!imageRef.current) {
       setImageRenderInfo(null);
@@ -2096,6 +2125,16 @@ function PagesView({
             <span>{selectedPage?.route || ""}</span>
           </div>
           <div className="toolbar-group">
+            <button
+              className="toolbar-button"
+              onClick={refreshPages}
+              disabled={Boolean(activeImageTask)}
+              title={t("刷新页面数据")}
+              type="button"
+            >
+              <RefreshCw size={16} />
+              {t("刷新")}
+            </button>
             {selectedPage?.needUpdate ? (
               <div className="page-update-hint">
                 <RefreshCw size={15} />

@@ -44,7 +44,7 @@ export const pageMetaSchema = z.object({
   assetIds: z.array(z.string()),
   dataDir: z.string().min(1).optional(),
   updatedAt: z.string().min(1).optional()
-});
+}).passthrough();
 
 export const pageIndexMetaSchema = z.object({
   id: z.string().min(1),
@@ -98,13 +98,10 @@ export const pagesIndexJsonSchema = z.object({
   schemaVersion: z.literal(2),
   project: projectMetaSchema,
   documents: z.array(documentMetaSchema),
-  pages: z.array(pageIndexMetaSchema)
+  pages: z.array(pageIndexMetaSchema.passthrough())
 });
 
-export const pageDataJsonSchema = pageMetaSchema.extend({
-  dataDir: z.never().optional(),
-  updatedAt: z.never().optional()
-});
+export const pageDataJsonSchema = pageMetaSchema.omit({ dataDir: true }).passthrough();
 
 export const legacyPagesJsonDiskSchema = z.object({
   schemaVersion: z.literal(1),

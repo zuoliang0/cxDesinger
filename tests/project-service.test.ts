@@ -73,6 +73,78 @@ describe("ProjectService", () => {
     });
   });
 
+  it("opens split page data that includes updatedAt and external page fields", async () => {
+    const userDataDir = await makeTempDir("user-data");
+    const rootDir = await makeTempDir("project-root");
+    const timestamp = "2026-05-08T00:00:00.000Z";
+    const service = new ProjectService(userDataDir);
+
+    await fs.mkdir(path.join(rootDir, "pages", "page_home"), { recursive: true });
+    await fs.writeFile(
+      path.join(rootDir, "pages.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 2,
+          project: {
+            id: "project_split",
+            name: "Split",
+            type: "web",
+            createdAt: timestamp,
+            updatedAt: timestamp
+          },
+          documents: [],
+          pages: [
+            {
+              id: "page_home",
+              name: "Home",
+              title: "Home Title",
+              type: "app-page",
+              route: "/",
+              source: "frontend/src/pages/Home.tsx",
+              description: "Home page",
+              dataDir: "pages/page_home",
+              updatedAt: timestamp
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(rootDir, "pages", "page_home", "page.json"),
+      `${JSON.stringify(
+        {
+          id: "page_home",
+          name: "Home",
+          title: "Home Title",
+          type: "app-page",
+          route: "/",
+          source: "frontend/src/pages/Home.tsx",
+          description: "Home page",
+          updatedAt: timestamp,
+          uiPrompt: "Home prompt",
+          assetIds: []
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const opened = await service.openProject(rootDir);
+
+    expect(opened.meta.pages[0]).toMatchObject({
+      id: "page_home",
+      dataDir: "pages/page_home",
+      updatedAt: timestamp
+    });
+    expect((opened.meta.pages[0] as unknown as Record<string, unknown>).source).toBe(
+      "frontend/src/pages/Home.tsx"
+    );
+  });
+
   it("migrates a legacy v1 project to split page files on write", async () => {
     const userDataDir = await makeTempDir("user-data");
     const rootDir = await makeTempDir("project-root");
