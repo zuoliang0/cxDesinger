@@ -33,6 +33,8 @@ import type {
   SaveSliceSelectionsInput,
   SetActivePageImageVersionInput,
   SyncPagePlanInput,
+  VectorizeSliceAssetInput,
+  VectorizeSliceSelectionInput,
   ResizeCodeTerminalInput,
   WriteCodeTerminalInput,
   WriteProjectFileInput,
@@ -55,6 +57,8 @@ export interface ElectronApi {
   generateSliceAsset: (input: GenerateSliceAssetInput) => Promise<ProjectInfo>;
   saveSliceSelections: (input: SaveSliceSelectionsInput) => Promise<ProjectInfo>;
   generateSliceAssets: (input: GenerateSliceAssetsInput) => Promise<ProjectInfo>;
+  vectorizeSliceAsset: (input: VectorizeSliceAssetInput) => Promise<ProjectInfo>;
+  vectorizeSliceSelection: (input: VectorizeSliceSelectionInput) => Promise<ProjectInfo>;
   listPageImageVersions: (input: ListPageImageVersionsInput) => Promise<PageImageVersion[]>;
   setActivePageImageVersion: (input: SetActivePageImageVersionInput) => Promise<ProjectInfo>;
   exportProjectZip: (input: ExportProjectInput) => Promise<ExportProjectResult>;

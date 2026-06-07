@@ -442,6 +442,72 @@ export function createDemoApi(): ElectronApi {
       };
       return demoProject;
     },
+    vectorizeSliceAsset: async (input) => {
+      demoProject = {
+        ...demoProject,
+        meta: {
+          ...demoProject.meta,
+          assets: demoProject.meta.assets.map((asset) =>
+            asset.id === input.assetId && asset.pageId === input.pageId
+              ? {
+                  ...asset,
+                  vectorPath: `assets/vectors/${input.pageId}/${input.assetId}.svg`
+                }
+              : asset
+          )
+        }
+      };
+      return demoProject;
+    },
+    vectorizeSliceSelection: async (input) => {
+      const selection = demoProject.meta.sliceSelections?.find((item) => item.id === input.selectionId);
+
+      if (!selection) {
+        return demoProject;
+      }
+
+      const existingAsset = demoProject.meta.assets.find((asset) => asset.id === selection.assetId);
+      const assetId = existingAsset?.id ?? `asset_${Date.now()}`;
+      const vectorPath = `assets/vectors/${input.pageId}/${assetId}.svg`;
+      const nextAsset = existingAsset
+        ? {
+            ...existingAsset,
+            vectorPath
+          }
+        : {
+            id: assetId,
+            pageId: input.pageId,
+            type: "slice" as const,
+            name: selection.name,
+            path: `assets/slices/${input.pageId}/${assetId}.png`,
+            vectorPath,
+            sourceImagePath: selection.sourceImagePath,
+            selection: selection.selection,
+            selectionId: selection.id,
+            prompt: selection.prompt,
+            createdAt: new Date().toISOString()
+          };
+
+      demoProject = {
+        ...demoProject,
+        meta: {
+          ...demoProject.meta,
+          assets: existingAsset
+            ? demoProject.meta.assets.map((asset) => (asset.id === existingAsset.id ? nextAsset : asset))
+            : [...demoProject.meta.assets, nextAsset],
+          sliceSelections: (demoProject.meta.sliceSelections ?? []).map((item) =>
+            item.id === selection.id
+              ? {
+                  ...item,
+                  status: "generated",
+                  assetId
+                }
+              : item
+          )
+        }
+      };
+      return demoProject;
+    },
     listPageImageVersions: async (input) => {
       const activePath = demoProject.meta.pages.find((page) => page.id === input.pageId)?.imagePath;
       return (demoPageVersions.get(input.pageId) || []).map((versionPath, index) => ({

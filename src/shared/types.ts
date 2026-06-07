@@ -75,6 +75,7 @@ export interface AssetMeta {
   type: "slice";
   name: string;
   path: string;
+  vectorPath?: string;
   sourceImagePath: string;
   selection: SelectionRect;
   selectionId?: string;
@@ -309,6 +310,18 @@ export interface GenerateSliceAssetsInput {
   taskId?: string;
   model?: CodexModel;
   reasoningEffort?: CodexReasoningEffort;
+}
+
+export interface VectorizeSliceAssetInput {
+  projectRoot: string;
+  pageId: string;
+  assetId: string;
+}
+
+export interface VectorizeSliceSelectionInput {
+  projectRoot: string;
+  pageId: string;
+  selectionId: string;
 }
 
 export interface ListPageImageVersionsInput {

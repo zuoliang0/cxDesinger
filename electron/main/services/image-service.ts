@@ -1,12 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type {
+  AssetMeta,
   PageImageAnnotation,
   PageImageVersion,
   ProjectInfo,
   SliceSelectionMeta
 } from "../../../src/shared/types";
 import { ensureInsideProject, makeId, nowIso, pathExists } from "../utils/fs";
+import { createCodexProcessEnv } from "../utils/codex-command";
 import type {
   CodexImageStreamOptions,
   GeneratedSliceAssetResult,
@@ -17,6 +21,8 @@ import type {
   GenerateSliceAssetsParams
 } from "./codex-image-provider";
 import { ProjectService } from "./project-service";
+
+const execFileAsync = promisify(execFile);
 
 interface ImageProvider {
   generatePageImage(
@@ -496,6 +502,203 @@ export class ImageService {
     await this.projectService.touchIndex(projectRoot, next);
 
     return { rootDir: projectRoot, meta: next };
+  }
+
+  async vectorizeSliceAsset(projectRoot: string, pageId: string, assetId: string): Promise<ProjectInfo> {
+    const current = await this.projectService.ensureSplitProject(projectRoot);
+    const page = current.pages.find((item) => item.id === pageId);
+
+    if (!page) {
+      throw new Error("页面不存在");
+    }
+
+    const asset = current.assets.find((item) => item.pageId === pageId && item.id === assetId);
+
+    if (!asset) {
+      throw new Error("切图素材不存在");
+    }
+
+    const sourcePath = ensureInsideProject(projectRoot, asset.path);
+    const outputRelativePath = `assets/vectors/${pageId}/${assetId}.svg`;
+    const outputPath = ensureInsideProject(projectRoot, outputRelativePath);
+    const timestamp = nowIso();
+
+    await this.runVTracer(projectRoot, sourcePath, outputPath);
+
+    const next = {
+      ...current,
+      project: {
+        ...current.project,
+        updatedAt: timestamp
+      },
+      assets: current.assets.map((item) =>
+        item.id === asset.id
+          ? {
+              ...item,
+              vectorPath: outputRelativePath
+            }
+          : item
+      )
+    };
+
+    await this.projectService.writePagesJson(projectRoot, next);
+    await this.projectService.touchIndex(projectRoot, next);
+
+    return { rootDir: projectRoot, meta: next };
+  }
+
+  async vectorizeSliceSelection(projectRoot: string, pageId: string, selectionId: string): Promise<ProjectInfo> {
+    const current = await this.projectService.ensureSplitProject(projectRoot);
+    const page = current.pages.find((item) => item.id === pageId);
+
+    if (!page) {
+      throw new Error("页面不存在");
+    }
+
+    const selection = current.sliceSelections?.find(
+      (item) => item.pageId === pageId && item.id === selectionId
+    );
+
+    if (!selection) {
+      throw new Error("切图区域不存在");
+    }
+
+    if (selection.assetId) {
+      const existingAsset = current.assets.find((item) => item.id === selection.assetId);
+
+      if (existingAsset) {
+        return this.vectorizeSliceAsset(projectRoot, pageId, existingAsset.id);
+      }
+    }
+
+    const timestamp = nowIso();
+    const assetId = makeId("asset");
+    const sliceRelativePath = `assets/slices/${pageId}/${assetId}.png`;
+    const vectorRelativePath = `assets/vectors/${pageId}/${assetId}.svg`;
+    const slicePath = ensureInsideProject(projectRoot, sliceRelativePath);
+    const vectorPath = ensureInsideProject(projectRoot, vectorRelativePath);
+    const sourcePath = ensureInsideProject(projectRoot, selection.sourceImagePath);
+
+    await this.cropSelectionToPng(projectRoot, sourcePath, slicePath, selection);
+    await this.runVTracer(projectRoot, slicePath, vectorPath);
+
+    const asset: AssetMeta = {
+      id: assetId,
+      pageId,
+      type: "slice",
+      name: selection.name,
+      path: sliceRelativePath,
+      vectorPath: vectorRelativePath,
+      sourceImagePath: selection.sourceImagePath,
+      selection: selection.selection,
+      selectionId: selection.id,
+      prompt: selection.prompt,
+      createdAt: timestamp
+    };
+
+    const nextSelections = (current.sliceSelections ?? []).map((item) =>
+      item.id === selection.id
+        ? {
+            ...item,
+            status: "generated" as const,
+            assetId,
+            updatedAt: timestamp
+          }
+        : item
+    );
+    const pageAssetIds = Array.from(new Set([...page.assetIds, assetId]));
+    const next = {
+      ...current,
+      project: {
+        ...current.project,
+        updatedAt: timestamp
+      },
+      pages: current.pages.map((item) =>
+        item.id === page.id
+          ? {
+              ...item,
+              assetIds: pageAssetIds
+            }
+          : item
+      ),
+      assets: [...current.assets, asset],
+      sliceSelections: nextSelections
+    };
+
+    await this.projectService.writePagesJson(projectRoot, next);
+    await this.projectService.touchIndex(projectRoot, next);
+
+    return { rootDir: projectRoot, meta: next };
+  }
+
+  private async cropSelectionToPng(
+    projectRoot: string,
+    sourcePath: string,
+    outputPath: string,
+    selection: SliceSelectionMeta
+  ): Promise<void> {
+    const rect = selection.selection;
+    const x = Math.max(0, Math.round(rect.x));
+    const y = Math.max(0, Math.round(rect.y));
+    const width = Math.max(1, Math.round(rect.width));
+    const height = Math.max(1, Math.round(rect.height));
+
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+    try {
+      await execFileAsync(
+        "sips",
+        [sourcePath, "--cropOffset", String(y), String(x), "-c", String(height), String(width), "--out", outputPath],
+        {
+          cwd: projectRoot,
+          env: createCodexProcessEnv(),
+          timeout: 60_000,
+          maxBuffer: 1024 * 1024 * 4
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`按选区裁剪 PNG 失败：${message}`);
+    }
+
+    if (!(await pathExists(outputPath))) {
+      throw new Error("按选区裁剪 PNG 失败：未生成输出文件");
+    }
+  }
+
+  private async runVTracer(projectRoot: string, sourcePath: string, outputPath: string): Promise<void> {
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+
+    try {
+      await execFileAsync(
+        "vtracer",
+        ["--input", sourcePath, "--output", outputPath, "--preset", "poster"],
+        {
+          cwd: projectRoot,
+          env: createCodexProcessEnv(),
+          timeout: 120_000,
+          maxBuffer: 1024 * 1024 * 4
+        }
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes("ENOENT") || message.includes("not found")) {
+        throw new Error(
+          [
+            "未找到 VTracer 命令行工具，无法转换 SVG。",
+            "请先安装 VTracer：`cargo install vtracer`，或从 https://github.com/visioncortex/vtracer/releases 下载可执行文件并加入 PATH。",
+            "安装后重启 cxDesinger 再重试。"
+          ].join(" ")
+        );
+      }
+
+      throw new Error(`VTracer 转换失败：${message}`);
+    }
+
+    if (!(await pathExists(outputPath))) {
+      throw new Error("VTracer 未生成 SVG 文件");
+    }
   }
 
   private async getNextPageImageVersionPath(projectRoot: string, pageId: string): Promise<string> {

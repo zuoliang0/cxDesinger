@@ -60,6 +60,7 @@ type SliceGenerateMode = "pending" | "force";
 type DocumentMode = "discussion" | "edit";
 type PageAssetPreview =
   | { kind: "slice"; assetId: string; dataUrl: string }
+  | { kind: "vector"; assetId: string; path: string; dataUrl: string }
   | { kind: "background"; path: string; dataUrl: string };
 
 const api = window.aiProductDesigner ?? createDemoApi();
@@ -1269,6 +1270,7 @@ function PagesView({
   const [referenceImages, setReferenceImages] = useState<ReferenceImageMeta[]>([]);
   const [imageData, setImageData] = useState("");
   const [assetPreview, setAssetPreview] = useState<PageAssetPreview | null>(null);
+  const [vectorizingAssetId, setVectorizingAssetId] = useState("");
   const [imageVersions, setImageVersions] = useState<PageImageVersion[]>([]);
   const [sliceSelections, setSliceSelections] = useState<SliceSelectionMeta[]>([]);
   const [selectedSelectionId, setSelectedSelectionId] = useState("");
@@ -1887,12 +1889,18 @@ function PagesView({
   const selectedSliceSelection = sliceSelections.find((selection) => selection.id === selectedSelectionId);
   const selectedPreviewAsset = assetPreview?.kind === "slice"
     ? pageAssets.find((asset) => asset.id === assetPreview.assetId)
+    : assetPreview?.kind === "vector"
+      ? pageAssets.find((asset) => asset.id === assetPreview.assetId)
     : null;
   const previewTitle = assetPreview?.kind === "background"
     ? t("页面背景")
+    : assetPreview?.kind === "vector"
+      ? `${selectedPreviewAsset?.name || t("切图素材")} SVG`
     : selectedPreviewAsset?.name || t("切图素材");
   const previewPath = assetPreview?.kind === "background"
     ? assetPreview.path
+    : assetPreview?.kind === "vector"
+      ? assetPreview.path
     : selectedPreviewAsset?.path || "";
 
   async function refreshPages() {
@@ -1982,6 +1990,91 @@ function PagesView({
       setAssetPreview({ kind: "slice", assetId: asset.id, dataUrl });
     } catch (err) {
       onError(toErrorMessage(err));
+    }
+  }
+
+  async function vectorizeSliceAsset(asset: AssetMeta) {
+    if (!selectedPage || vectorizingAssetId) {
+      return;
+    }
+
+    setVectorizingAssetId(asset.id);
+    onError("");
+
+    try {
+      const updated = await api.vectorizeSliceAsset({
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        assetId: asset.id
+      });
+      const vectorizedAsset = updated.meta.assets.find((item) => item.id === asset.id);
+
+      onProjectChange(updated);
+
+      if (vectorizedAsset?.vectorPath) {
+        const dataUrl = await api.readAssetAsDataUrl({
+          projectRoot: project.rootDir,
+          relativePath: vectorizedAsset.vectorPath
+        });
+        setAssetPreview({
+          kind: "vector",
+          assetId: asset.id,
+          path: vectorizedAsset.vectorPath,
+          dataUrl
+        });
+      }
+
+      onNotice(t("SVG 已生成"));
+    } catch (error) {
+      onError(toErrorMessage(error));
+    } finally {
+      setVectorizingAssetId("");
+    }
+  }
+
+  async function vectorizeSliceSelection(selection: SliceSelectionMeta, linkedAsset?: AssetMeta) {
+    if (!selectedPage || vectorizingAssetId) {
+      return;
+    }
+
+    if (linkedAsset) {
+      await vectorizeSliceAsset(linkedAsset);
+      return;
+    }
+
+    setVectorizingAssetId(selection.id);
+    setSelectedSelectionId(selection.id);
+    onError("");
+
+    try {
+      const updated = await api.vectorizeSliceSelection({
+        projectRoot: project.rootDir,
+        pageId: selectedPage.id,
+        selectionId: selection.id
+      });
+      const vectorizedSelection = updated.meta.sliceSelections?.find((item) => item.id === selection.id);
+      const vectorizedAsset = updated.meta.assets.find((item) => item.id === vectorizedSelection?.assetId);
+
+      onProjectChange(updated);
+
+      if (vectorizedAsset?.vectorPath) {
+        const dataUrl = await api.readAssetAsDataUrl({
+          projectRoot: project.rootDir,
+          relativePath: vectorizedAsset.vectorPath
+        });
+        setAssetPreview({
+          kind: "vector",
+          assetId: vectorizedAsset.id,
+          path: vectorizedAsset.vectorPath,
+          dataUrl
+        });
+      }
+
+      onNotice(t("SVG 已生成"));
+    } catch (error) {
+      onError(toErrorMessage(error));
+    } finally {
+      setVectorizingAssetId("");
     }
   }
 
@@ -2546,6 +2639,23 @@ function PagesView({
                       {t("查看")}
                     </button>
                     <button
+                      className="secondary-button compact slice-preview-button"
+                      disabled={Boolean(vectorizingAssetId)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void vectorizeSliceSelection(selection, linkedAsset);
+                      }}
+                      title={t("转为 SVG")}
+                      type="button"
+                    >
+                      {vectorizingAssetId === (linkedAsset?.id ?? selection.id) ? (
+                        <Loader2 className="spin" size={14} />
+                      ) : (
+                        <Code2 size={14} />
+                      )}
+                      {linkedAsset?.vectorPath ? t("SVG") : t("转SVG")}
+                    </button>
+                    <button
                       className="icon-button compact"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -3006,8 +3116,8 @@ function readFileAsDataUrl(file: File): Promise<string> {
     });
     reader.addEventListener("error", () => reject(reader.error || new Error("参考图片读取失败")));
     reader.readAsDataURL(file);
-  });
-}
+    });
+  }
 
 function getClipboardImageFiles(event: ClipboardEvent<HTMLElement>): File[] {
   const files = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));

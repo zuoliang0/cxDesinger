@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,7 +16,8 @@ export function createCodexProcessEnv(): NodeJS.ProcessEnv {
     "/usr/bin",
     "/bin",
     "/usr/sbin",
-    "/sbin"
+    "/sbin",
+    path.join(os.homedir(), ".cargo", "bin")
   ];
   const pathValue = [...fallbackPaths, process.env.PATH || ""].filter(Boolean).join(":");
 

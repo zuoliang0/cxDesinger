@@ -24,6 +24,8 @@ import type {
   SaveSliceSelectionsInput,
   SetActivePageImageVersionInput,
   SyncPagePlanInput,
+  VectorizeSliceAssetInput,
+  VectorizeSliceSelectionInput,
   WriteCodeTerminalInput,
   WriteProjectFileInput
 } from "../../src/shared/types";
@@ -433,6 +435,26 @@ function registerIpc(): void {
     } finally {
       endTask(input.taskId);
     }
+  });
+
+  ipcMain.handle("image:vectorizeSliceAsset", async (_event, input: VectorizeSliceAssetInput) => {
+    const settings = await settingsService.getSettings();
+    const service = new ImageService(
+      projectService,
+      CodexImageProvider.fromSettings(settings)
+    );
+
+    return service.vectorizeSliceAsset(input.projectRoot, input.pageId, input.assetId);
+  });
+
+  ipcMain.handle("image:vectorizeSliceSelection", async (_event, input: VectorizeSliceSelectionInput) => {
+    const settings = await settingsService.getSettings();
+    const service = new ImageService(
+      projectService,
+      CodexImageProvider.fromSettings(settings)
+    );
+
+    return service.vectorizeSliceSelection(input.projectRoot, input.pageId, input.selectionId);
   });
 
   ipcMain.handle("image:listVersions", async (_event, input: ListPageImageVersionsInput) => {
