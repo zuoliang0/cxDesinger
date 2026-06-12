@@ -78,4 +78,21 @@ describe("ProjectFileService", () => {
     await expect(service.readProjectFile(rootDir, "../outside.txt")).rejects.toThrow("不能越过项目根目录");
     await expect(service.readProjectFile(rootDir, "binary.txt")).rejects.toThrow("二进制内容");
   });
+
+  it("deletes project files and directories without allowing root or outside paths", async () => {
+    const rootDir = await makeTempDir("project-files");
+    await fs.mkdir(path.join(rootDir, "docs"), { recursive: true });
+    await fs.writeFile(path.join(rootDir, "README.md"), "# Demo\n", "utf8");
+    await fs.writeFile(path.join(rootDir, "docs/prd.md"), "# PRD\n", "utf8");
+    const service = new ProjectFileService();
+
+    await service.deleteProjectFile(rootDir, "README.md");
+    await expect(fs.access(path.join(rootDir, "README.md"))).rejects.toThrow();
+
+    await service.deleteProjectFile(rootDir, "docs");
+    await expect(fs.access(path.join(rootDir, "docs"))).rejects.toThrow();
+
+    await expect(service.deleteProjectFile(rootDir, "")).rejects.toThrow("不能删除项目根目录");
+    await expect(service.deleteProjectFile(rootDir, "../outside.txt")).rejects.toThrow("不能越过项目根目录");
+  });
 });

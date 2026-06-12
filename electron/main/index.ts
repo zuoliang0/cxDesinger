@@ -1,13 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import type {
   AppSettings,
   CloseCodeTerminalInput,
   CreateDocumentInput,
   CreateCodeTerminalInput,
   ExportProjectInput,
+  DeleteProjectFileInput,
   GeneratePageBackgroundInput,
   GenerateSliceAssetsInput,
   GeneratePageImageInput,
@@ -17,6 +18,7 @@ import type {
   ReadAssetInput,
   ReadDocumentInput,
   ReadProjectFileInput,
+  RevealProjectFileInput,
   ResizeCodeTerminalInput,
   ReviseDocumentInput,
   RunPlanningInput,
@@ -527,6 +529,16 @@ function registerIpc(): void {
   ipcMain.handle("project:writeFile", (_event, input: WriteProjectFileInput) =>
     projectFileService.writeProjectFile(input)
   );
+
+  ipcMain.handle("project:deleteFile", (_event, input: DeleteProjectFileInput) =>
+    projectFileService.deleteProjectFile(input.projectRoot, input.relativePath)
+  );
+
+  ipcMain.handle("project:revealFile", async (_event, input: RevealProjectFileInput) => {
+    const filePath = ensureInsideProject(input.projectRoot, input.relativePath);
+    await fs.access(filePath);
+    shell.showItemInFolder(filePath);
+  });
 
   ipcMain.handle("codeTerminal:create", async (event, input: CreateCodeTerminalInput) => {
     const settings = await settingsService.getSettings();

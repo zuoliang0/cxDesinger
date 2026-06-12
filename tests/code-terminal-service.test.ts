@@ -57,7 +57,7 @@ describe("CodeTerminalService", () => {
 
     await service.createTerminal(
       { projectRoot, terminalId: "terminal-1", cols: 120, rows: 32 },
-      { codex: { command, args: ["--model", "gpt-5.5"], timeoutMs: 1000 } },
+      { codex: { command, args: ["--model", "gpt-5.5"], proxy: "", timeoutMs: 1000 } },
       webContents
     );
 
@@ -91,7 +91,7 @@ describe("CodeTerminalService", () => {
 
     await service.createTerminal(
       { projectRoot, terminalId: "terminal-2" },
-      { codex: { command, args: [], timeoutMs: 1000 } },
+      { codex: { command, args: [], proxy: "", timeoutMs: 1000 } },
       webContents
     );
 

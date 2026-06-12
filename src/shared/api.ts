@@ -8,6 +8,7 @@ import type {
   CreateDocumentResult,
   CreateCodeTerminalInput,
   CreateProjectInput,
+  DeleteProjectFileInput,
   ExportProjectInput,
   ExportProjectResult,
   GeneratePageBackgroundInput,
@@ -25,6 +26,7 @@ import type {
   ReadDocumentInput,
   ReadProjectFileInput,
   ReadProjectFileResult,
+  RevealProjectFileInput,
   ReferenceImageMeta,
   ReviseDocumentInput,
   ReviseDocumentResult,
@@ -64,6 +66,8 @@ export interface ElectronApi {
   listProjectFiles: (input: ListProjectFilesInput) => Promise<ProjectFileNode[]>;
   readProjectFile: (input: ReadProjectFileInput) => Promise<ReadProjectFileResult>;
   writeProjectFile: (input: WriteProjectFileInput) => Promise<WriteProjectFileResult>;
+  deleteProjectFile: (input: DeleteProjectFileInput) => Promise<void>;
+  revealProjectFile: (input: RevealProjectFileInput) => Promise<void>;
   createCodeTerminal: (input: CreateCodeTerminalInput) => Promise<void>;
   writeCodeTerminal: (input: WriteCodeTerminalInput) => Promise<void>;
   resizeCodeTerminal: (input: ResizeCodeTerminalInput) => Promise<void>;

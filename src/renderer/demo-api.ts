@@ -69,6 +69,7 @@ const settings: AppSettings = {
   codex: {
     command: "codex",
     args: [],
+    proxy: "",
     timeoutMs: 180_000
   }
 };
@@ -575,6 +576,14 @@ export function createDemoApi(): ElectronApi {
         size: input.content.length
       };
     },
+    deleteProjectFile: async (input) => {
+      if (input.relativePath === "pages.json") {
+        throw new Error("Demo pages.json cannot be deleted");
+      }
+
+      delete demoDocuments[input.relativePath];
+    },
+    revealProjectFile: async () => undefined,
     createCodeTerminal: async (input) => {
       queueMicrotask(() => {
         for (const listener of terminalDataListeners) {

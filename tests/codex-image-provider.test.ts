@@ -14,6 +14,7 @@ describe("CodexImageProvider", () => {
     const provider = new CodexImageProvider({
       command: process.execPath,
       args: [path.resolve("tests/fixtures/fake-image-codex.cjs")],
+      proxy: "",
       timeoutMs: 5_000
     });
     const events: Array<{ level: string; message: string }> = [];
@@ -71,6 +72,7 @@ describe("CodexImageProvider", () => {
     const provider = new CodexImageProvider({
       command,
       args: [],
+      proxy: "",
       timeoutMs: 5_000
     });
     const referencePath = path.join(projectRoot, "tmp/reference-images/ref.png");
@@ -112,6 +114,7 @@ describe("CodexImageProvider", () => {
     const provider = new CodexImageProvider({
       command: process.execPath,
       args: [path.resolve("tests/fixtures/fake-image-codex.cjs"), "--timeout"],
+      proxy: "",
       timeoutMs: 50
     });
 
@@ -137,6 +140,7 @@ describe("CodexImageProvider", () => {
     const provider = new CodexImageProvider({
       command: process.execPath,
       args: [path.resolve("tests/fixtures/fake-image-codex.cjs")],
+      proxy: "",
       timeoutMs: 5_000
     });
 

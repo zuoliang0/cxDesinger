@@ -18,6 +18,7 @@ describe("CodexTextProvider", () => {
     const provider = new CodexTextProvider({
       command: process.execPath,
       args: [],
+      proxy: "",
       timeoutMs: 5_000
     });
     const prompt = (provider as unknown as {
@@ -38,6 +39,7 @@ describe("CodexTextProvider", () => {
     const provider = new CodexTextProvider({
       command: process.execPath,
       args: [path.resolve("tests/fixtures/fake-codex.cjs")],
+      proxy: "",
       timeoutMs: 5_000
     });
 
@@ -57,6 +59,7 @@ describe("CodexTextProvider", () => {
     const provider = new CodexTextProvider({
       command,
       args: [],
+      proxy: "",
       timeoutMs: 5_000
     });
     const referencePath = path.join(projectRoot, "tmp/reference-images/ref.png");
@@ -81,6 +84,7 @@ describe("CodexTextProvider", () => {
     const provider = new CodexTextProvider({
       command,
       args: [],
+      proxy: "",
       timeoutMs: 5_000
     });
     const events: Array<{ level: string; message: string }> = [];
@@ -120,6 +124,7 @@ describe("CodexTextProvider", () => {
     const provider = new CodexTextProvider({
       command,
       args: [],
+      proxy: "",
       timeoutMs: 5_000
     });
 

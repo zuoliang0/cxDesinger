@@ -172,6 +172,7 @@ export interface AppSettings {
     command: string;
     args: string[];
     timeoutMs: number;
+    proxy: string;
   };
 }
 
@@ -384,6 +385,16 @@ export interface WriteProjectFileResult {
   path: string;
   mtimeMs: number;
   size: number;
+}
+
+export interface DeleteProjectFileInput {
+  projectRoot: string;
+  relativePath: string;
+}
+
+export interface RevealProjectFileInput {
+  projectRoot: string;
+  relativePath: string;
 }
 
 export interface CreateCodeTerminalInput {

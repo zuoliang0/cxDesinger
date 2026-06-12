@@ -15,12 +15,14 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ExternalLink,
   File,
   Folder,
   Loader2,
   RefreshCw,
   Save,
   TerminalSquare,
+  Trash2,
   Wand2,
   X
 } from "lucide-react";
@@ -47,6 +49,12 @@ type WorkspaceTab =
       path: string;
       closable: true;
     };
+
+interface FileTreeContextMenu {
+  node: ProjectFileNode;
+  x: number;
+  y: number;
+}
 
 const HOME_TAB: WorkspaceTab = {
   id: "home",
@@ -75,6 +83,7 @@ export function CodeWorkspace({
   const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [hasActivated, setHasActivated] = useState(active);
+  const [contextMenu, setContextMenu] = useState<FileTreeContextMenu | null>(null);
   const terminalCount = useMemo(
     () => tabs.filter((tab) => tab.kind === "terminal").length,
     [tabs]
@@ -85,6 +94,29 @@ export function CodeWorkspace({
       setHasActivated(true);
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const closeMenu = () => setContextMenu(null);
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", closeWithEscape);
+
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     setTabs([HOME_TAB]);
@@ -186,6 +218,94 @@ export function CodeWorkspace({
     }
   }
 
+  async function deleteFileTreeNode(node: ProjectFileNode) {
+    setContextMenu(null);
+    const message =
+      node.type === "directory"
+        ? t("确认删除文件夹“{name}”及其全部内容吗？此操作无法撤销。", { name: node.name })
+        : t("确认删除文件“{name}”吗？此操作无法撤销。", { name: node.name });
+
+    if (!window.confirm(message)) {
+      return;
+    }
+
+    try {
+      await api.deleteProjectFile({ projectRoot: project.rootDir, relativePath: node.path });
+      closeTabsForDeletedPath(node.path);
+      await refreshFiles();
+      onNotice(t("已删除：{path}", { path: node.path }));
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  async function revealFileTreeNode(node: ProjectFileNode) {
+    setContextMenu(null);
+
+    try {
+      await api.revealProjectFile({ projectRoot: project.rootDir, relativePath: node.path });
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  async function importFileTreeNodeToCodex(node: ProjectFileNode) {
+    setContextMenu(null);
+    const terminalTab = getTargetTerminalTab();
+
+    if (!terminalTab) {
+      onError(t("当前没有可用的 Codex 终端"));
+      return;
+    }
+
+    const targetType = node.type === "directory" ? "项目目录" : "项目文件";
+    const prompt = `请读取并引入${targetType}：${node.path}\r`;
+
+    try {
+      await api.writeCodeTerminal({ terminalId: terminalTab.terminalId, data: prompt });
+      setActiveTabId(terminalTab.id);
+      onNotice(t("已发送到 Codex：{path}", { path: node.path }));
+    } catch (err) {
+      onError(toErrorMessage(err));
+    }
+  }
+
+  function getTargetTerminalTab(): Extract<WorkspaceTab, { kind: "terminal" }> | null {
+    const activeTerminal = tabs.find(
+      (tab): tab is Extract<WorkspaceTab, { kind: "terminal" }> => tab.id === activeTabId && tab.kind === "terminal"
+    );
+
+    if (activeTerminal) {
+      return activeTerminal;
+    }
+
+    const terminalTabs = tabs.filter((tab): tab is Extract<WorkspaceTab, { kind: "terminal" }> => tab.kind === "terminal");
+    return terminalTabs.at(-1) || null;
+  }
+
+  function closeTabsForDeletedPath(deletedPath: string) {
+    setTabs((current) => {
+      const next = current.filter((tab) => tab.kind !== "file" || !isDeletedPathMatch(tab.path, deletedPath));
+
+      if (!next.some((tab) => tab.id === activeTabId)) {
+        setActiveTabId((next.at(-1) || HOME_TAB).id);
+      }
+
+      return next;
+    });
+    setDirtyTabs((current) => {
+      const next = { ...current };
+
+      for (const tab of tabs) {
+        if (tab.kind === "file" && isDeletedPathMatch(tab.path, deletedPath)) {
+          delete next[tab.id];
+        }
+      }
+
+      return next;
+    });
+  }
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || HOME_TAB;
   const shouldRenderTerminalTabs = hasActivated || active;
 
@@ -220,10 +340,38 @@ export function CodeWorkspace({
                   })
                 }
                 onOpenFile={openFile}
+                onContextMenu={(node, x, y) => setContextMenu({ node, x, y })}
               />
             ))
           )}
         </div>
+        {contextMenu ? (
+          <div
+            className="file-tree-context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => importFileTreeNodeToCodex(contextMenu.node).catch((err) => onError(toErrorMessage(err)))}
+            >
+              <TerminalSquare size={14} />
+              <span>{t("Codex 引入")}</span>
+            </button>
+            <button type="button" onClick={() => revealFileTreeNode(contextMenu.node).catch((err) => onError(toErrorMessage(err)))}>
+              <ExternalLink size={14} />
+              <span>{t("在 Finder 打开")}</span>
+            </button>
+            <button
+              className="danger"
+              type="button"
+              onClick={() => deleteFileTreeNode(contextMenu.node).catch((err) => onError(toErrorMessage(err)))}
+            >
+              <Trash2 size={14} />
+              <span>{t("删除")}</span>
+            </button>
+          </div>
+        ) : null}
       </aside>
       <section className="main-panel code-panel">
         <div className="workspace-tabs">
@@ -306,12 +454,14 @@ function FileTreeNode({
   node,
   expandedPaths,
   onToggle,
-  onOpenFile
+  onOpenFile,
+  onContextMenu
 }: {
   node: ProjectFileNode;
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onOpenFile: (node: ProjectFileNode) => void;
+  onContextMenu: (node: ProjectFileNode, x: number, y: number) => void;
 }) {
   const { t } = useI18n();
   const expanded = expandedPaths.has(node.path);
@@ -319,7 +469,14 @@ function FileTreeNode({
   if (node.type === "directory") {
     return (
       <div className="file-tree-group">
-        <button className="file-tree-row directory" onClick={() => onToggle(node.path)}>
+        <button
+          className="file-tree-row directory"
+          onClick={() => onToggle(node.path)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            onContextMenu(node, event.clientX, event.clientY);
+          }}
+        >
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Folder size={14} />
           <span>{node.name}</span>
@@ -333,6 +490,7 @@ function FileTreeNode({
                 expandedPaths={expandedPaths}
                 onToggle={onToggle}
                 onOpenFile={onOpenFile}
+                onContextMenu={onContextMenu}
               />
             ))}
           </div>
@@ -345,6 +503,10 @@ function FileTreeNode({
     <button
       className={node.editable ? "file-tree-row" : "file-tree-row disabled"}
       onClick={() => onOpenFile(node)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu(node, event.clientX, event.clientY);
+      }}
       title={node.editable ? node.path : t("不可编辑的文件")}
     >
       <span className="tree-spacer" />
@@ -371,7 +533,6 @@ function CodexTerminal({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const sessionTerminalIdRef = useRef(makeTabId(terminalId));
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -399,15 +560,15 @@ function CodexTerminal({
     requestAnimationFrame(() => terminal.focus());
 
     const dataDispose = terminal.onData((data) => {
-      api.writeCodeTerminal({ terminalId: sessionTerminalIdRef.current, data }).catch(() => undefined);
+      api.writeCodeTerminal({ terminalId, data }).catch(() => undefined);
     });
     const unsubscribeData = api.onCodeTerminalData((event) => {
-      if (event.terminalId === sessionTerminalIdRef.current) {
+      if (event.terminalId === terminalId) {
         terminal.write(event.data);
       }
     });
     const unsubscribeExit = api.onCodeTerminalExit((event) => {
-      if (event.terminalId === sessionTerminalIdRef.current) {
+      if (event.terminalId === terminalId) {
         terminal.write(`\r\n[${t("Codex 终端已退出：{code}", { code: event.exitCode ?? event.signal ?? "unknown" })}]\r\n`);
       }
     });
@@ -415,7 +576,7 @@ function CodexTerminal({
     api
       .createCodeTerminal({
         projectRoot,
-        terminalId: sessionTerminalIdRef.current,
+        terminalId,
         resumeLast,
         cols: terminal.cols,
         rows: terminal.rows
@@ -425,7 +586,7 @@ function CodexTerminal({
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
       api
-        .resizeCodeTerminal({ terminalId: sessionTerminalIdRef.current, cols: terminal.cols, rows: terminal.rows })
+        .resizeCodeTerminal({ terminalId, cols: terminal.cols, rows: terminal.rows })
         .catch(() => undefined);
     });
     resizeObserver.observe(containerRef.current);
@@ -436,7 +597,7 @@ function CodexTerminal({
       unsubscribeData();
       unsubscribeExit();
       terminal.dispose();
-      api.closeCodeTerminal({ terminalId: sessionTerminalIdRef.current }).catch(() => undefined);
+      api.closeCodeTerminal({ terminalId }).catch(() => undefined);
     };
   }, [projectRoot, terminalId, resumeLast]);
 
@@ -716,6 +877,10 @@ function getFileExtension(relativePath: string): string {
 
 function makeTabId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+function isDeletedPathMatch(openPath: string, deletedPath: string): boolean {
+  return openPath === deletedPath || openPath.startsWith(`${deletedPath}/`);
 }
 
 function formatFileSize(size: number): string {

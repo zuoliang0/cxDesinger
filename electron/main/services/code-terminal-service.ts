@@ -11,7 +11,7 @@ import type {
   ResizeCodeTerminalInput,
   WriteCodeTerminalInput
 } from "../../../src/shared/types";
-import { createCodexProcessEnv, resolveCodexCommand } from "../utils/codex-command";
+import { prepareCodexProcess } from "../utils/codex-command";
 
 interface TerminalSession {
   terminal: TerminalProcess;
@@ -37,8 +37,9 @@ export class CodeTerminalService {
     await fs.access(input.projectRoot);
     this.closeTerminal(input.terminalId);
 
-    const env = this.createTerminalEnv();
-    const command = await resolveCodexCommand(settings.codex.command || "codex", env.PATH || "");
+    const codexProcess = await prepareCodexProcess(settings.codex.command || "codex", settings.codex.proxy);
+    const env = this.createTerminalEnv(codexProcess.env);
+    const command = codexProcess.command;
     const args = this.createTerminalArgs(command, settings.codex.args, Boolean(input.resumeLast));
     const terminal = this.spawnTerminal(command, args, input.projectRoot, env, {
       cols: input.cols || 100,
@@ -115,9 +116,9 @@ export class CodeTerminalService {
     return session;
   }
 
-  private createTerminalEnv(): NodeJS.ProcessEnv {
+  private createTerminalEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     return {
-      ...createCodexProcessEnv(),
+      ...env,
       TERM: "xterm-256color"
     };
   }

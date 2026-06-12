@@ -1,13 +1,82 @@
 import { constants } from "node:fs";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+export interface PreparedCodexProcess {
+  command: string;
+  env: NodeJS.ProcessEnv;
+}
+
+const PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "npm_config_proxy",
+  "npm_config_https_proxy"
+];
+
 export function createCodexProcessEnv(): NodeJS.ProcessEnv {
+  const pathValue = createCodexPathValue(null);
+
+  return {
+    ...process.env,
+    PATH: pathValue
+  };
+}
+
+export async function prepareCodexProcess(command: string, proxy: string): Promise<PreparedCodexProcess> {
+  const shellPathValue = await resolveLoginShellPath();
+  const pathValue = createCodexPathValue(shellPathValue);
+  const env = createProcessEnv(pathValue, proxy);
+  const resolvedCommand = await resolveCodexCommand(command, pathValue);
+
+  return {
+    command: resolvedCommand,
+    env
+  };
+}
+
+function createProcessEnv(pathValue: string, proxy: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: pathValue
+  };
+  const trimmedProxy = proxy.trim();
+
+  for (const key of PROXY_ENV_KEYS) {
+    delete env[key];
+  }
+
+  if (!trimmedProxy) {
+    return env;
+  }
+
+  return {
+    ...env,
+    HTTP_PROXY: trimmedProxy,
+    HTTPS_PROXY: trimmedProxy,
+    ALL_PROXY: trimmedProxy,
+    http_proxy: trimmedProxy,
+    https_proxy: trimmedProxy,
+    all_proxy: trimmedProxy,
+    npm_config_proxy: trimmedProxy,
+    npm_config_https_proxy: trimmedProxy
+  };
+}
+
+function createCodexPathValue(shellPathValue: string | null): string {
   const fallbackPaths = [
+    path.join(os.homedir(), ".local", "devtools", "node", "current", "bin"),
+    path.join(os.homedir(), ".local", "npm-global", "bin"),
+    path.join(os.homedir(), ".local", "bin"),
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
     "/usr/local/bin",
@@ -17,12 +86,11 @@ export function createCodexProcessEnv(): NodeJS.ProcessEnv {
     "/usr/sbin",
     "/sbin"
   ];
-  const pathValue = [...fallbackPaths, process.env.PATH || ""].filter(Boolean).join(":");
+  const segments = [...fallbackPaths, shellPathValue || "", process.env.PATH || ""]
+    .flatMap((value) => value.split(":"))
+    .filter(Boolean);
 
-  return {
-    ...process.env,
-    PATH: pathValue
-  };
+  return [...new Set(segments)].join(":");
 }
 
 export async function resolveCodexCommand(command: string, pathValue: string): Promise<string> {
@@ -50,7 +118,7 @@ export async function resolveCodexCommand(command: string, pathValue: string): P
   throw new Error(createMissingCodexCliMessage(normalized));
 }
 
-export function createMissingCodexCliMessage(command = "codex"): string {
+export function createMissingCodexCliMessage(command: string): string {
   return [
     `未找到 Codex 命令行工具：${command}。`,
     "请先确认本机已安装 Codex CLI，并在系统终端运行 `codex --version` 检查是否可用。",
@@ -59,13 +127,36 @@ export function createMissingCodexCliMessage(command = "codex"): string {
   ].join(" ");
 }
 
+async function resolveLoginShellPath(): Promise<string | null> {
+  const shell = process.env.SHELL || "/bin/zsh";
+
+  try {
+    const { stdout } = await execFileAsync(shell, ["-lc", 'printf "%s" "$PATH"'], {
+      timeout: 3000,
+      env: {
+        ...process.env,
+        TERM: "xterm-256color"
+      }
+    });
+    const pathValue = stdout.trim();
+
+    return pathValue || null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveWithLoginShell(command: string): Promise<string | null> {
   const shell = process.env.SHELL || "/bin/zsh";
   const quotedCommand = command.replace(/'/g, "'\\''");
 
   try {
     const { stdout } = await execFileAsync(shell, ["-lc", `command -v '${quotedCommand}'`], {
-      timeout: 3000
+      timeout: 3000,
+      env: {
+        ...process.env,
+        TERM: "xterm-256color"
+      }
     });
     const resolved = stdout.trim().split("\n")[0];
 

@@ -2735,6 +2735,19 @@ function SettingsDialog({
             <textarea value={codexArgs} onChange={(event) => setCodexArgs(event.target.value)} />
           </label>
           <label className="field">
+            <span>{t("Codex 代理")}</span>
+            <input
+              placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:7890"
+              value={settings.codex.proxy}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  codex: { ...settings.codex, proxy: event.target.value }
+                })
+              }
+            />
+          </label>
+          <label className="field">
             <span>{t("Codex 超时分钟数")}</span>
             <input
               min={1}

@@ -14,6 +14,7 @@ describe("SettingsService", () => {
 
     await expect(service.getSettings()).resolves.toMatchObject({
       codex: {
+        proxy: "",
         timeoutMs: 30 * 60 * 1000
       }
     });
@@ -37,8 +38,43 @@ describe("SettingsService", () => {
 
     await expect(service.getSettings()).resolves.toMatchObject({
       codex: {
+        proxy: "",
         timeoutMs: 30 * 60 * 1000
       }
     });
+  });
+
+  it("normalizes optional codex proxy settings", async () => {
+    const service = new SettingsService(await makeTempDir("settings"));
+
+    await expect(
+      service.saveSettings({
+        codex: {
+          command: "codex",
+          args: [],
+          proxy: "127.0.0.1:7890",
+          timeoutMs: 30 * 60 * 1000
+        }
+      })
+    ).resolves.toMatchObject({
+      codex: {
+        proxy: "http://127.0.0.1:7890/"
+      }
+    });
+  });
+
+  it("rejects invalid codex proxy settings", async () => {
+    const service = new SettingsService(await makeTempDir("settings"));
+
+    await expect(
+      service.saveSettings({
+        codex: {
+          command: "codex",
+          args: [],
+          proxy: "ftp://127.0.0.1:7890",
+          timeoutMs: 30 * 60 * 1000
+        }
+      })
+    ).rejects.toThrow("Codex 代理配置无效");
   });
 });

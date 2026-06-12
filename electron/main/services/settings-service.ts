@@ -27,6 +27,7 @@ export class SettingsService {
       codex: {
         command: parsed.codex?.command || defaults.codex.command,
         args: Array.isArray(parsed.codex?.args) ? parsed.codex.args : defaults.codex.args,
+        proxy: this.normalizeProxy(parsed.codex?.proxy || defaults.codex.proxy),
         timeoutMs:
           parsed.codex?.timeoutMs === LEGACY_DEFAULT_TIMEOUT_MS
             ? defaults.codex.timeoutMs
@@ -40,6 +41,7 @@ export class SettingsService {
       codex: {
         command: settings.codex.command.trim() || "codex",
         args: settings.codex.args.filter(Boolean),
+        proxy: this.normalizeProxy(settings.codex.proxy),
         timeoutMs: settings.codex.timeoutMs || DEFAULT_TIMEOUT_MS
       }
     };
@@ -55,8 +57,38 @@ export class SettingsService {
       codex: {
         command: process.env.CODEX_CLI_PATH || "codex",
         args: [],
+        proxy: "",
         timeoutMs: DEFAULT_TIMEOUT_MS
       }
     };
+  }
+
+  private normalizeProxy(proxy: string): string {
+    const trimmed = proxy.trim();
+
+    if (!trimmed) {
+      return "";
+    }
+
+    const value = /^[a-z][a-z0-9+.-]*:\/\//iu.test(trimmed) ? trimmed : `http://${trimmed}`;
+
+    try {
+      const url = new URL(value);
+      const allowedProtocols = new Set(["http:", "https:", "socks:", "socks5:"]);
+
+      if (!allowedProtocols.has(url.protocol)) {
+        throw new Error(`代理协议不支持：${url.protocol}`);
+      }
+
+      if (!url.hostname || !url.port) {
+        throw new Error("代理地址必须包含主机和端口");
+      }
+
+      return url.toString();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      throw new Error(`Codex 代理配置无效：${message}。示例：http://127.0.0.1:7890 或 socks5://127.0.0.1:7890`);
+    }
   }
 }

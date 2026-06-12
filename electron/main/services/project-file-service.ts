@@ -163,6 +163,17 @@ export class ProjectFileService {
     };
   }
 
+  async deleteProjectFile(projectRoot: string, relativePath: string): Promise<void> {
+    const normalizedPath = this.normalizeRelativePath(relativePath);
+
+    if (!normalizedPath) {
+      throw new Error("不能删除项目根目录");
+    }
+
+    const filePath = ensureInsideProject(projectRoot, normalizedPath);
+    await fs.rm(filePath, { recursive: true, force: false });
+  }
+
   private shouldSkipEntry(name: string, isDirectory: boolean): boolean {
     if (name === ".DS_Store") {
       return true;

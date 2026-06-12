@@ -18,7 +18,7 @@ import {
   pagePlanSyncOutputSchema,
   planningOutputSchema
 } from "../../../src/shared/validation";
-import { createMissingCodexCliMessage, createCodexProcessEnv, resolveCodexCommand } from "../utils/codex-command";
+import { createMissingCodexCliMessage, prepareCodexProcess } from "../utils/codex-command";
 import { runProcess } from "../utils/process";
 
 const PLANNING_OUTPUT_JSON_SCHEMA = {
@@ -109,6 +109,7 @@ export interface CodexTextProviderOptions {
   command: string;
   args: string[];
   timeoutMs: number;
+  proxy: string;
 }
 
 export interface CodexStreamOptions {
@@ -150,7 +151,6 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
-    const env = createCodexProcessEnv();
     let command = this.options.command;
     let stdout = "";
     let stderr = "";
@@ -171,11 +171,12 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 生成结构化规划");
-      command = await resolveCodexCommand(this.options.command, env.PATH || "");
+      const codexProcess = await prepareCodexProcess(this.options.command, this.options.proxy);
+      command = codexProcess.command;
       const result = await runProcess({
         command,
         args,
-        env,
+        env: codexProcess.env,
         stdin: this.createPlanningPrompt(requirement, projectType),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -229,7 +230,6 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
-    const env = createCodexProcessEnv();
     let command = this.options.command;
     let stdout = "";
     let stderr = "";
@@ -251,11 +251,12 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 修改当前文档");
-      command = await resolveCodexCommand(this.options.command, env.PATH || "");
+      const codexProcess = await prepareCodexProcess(this.options.command, this.options.proxy);
+      command = codexProcess.command;
       const result = await runProcess({
         command,
         args,
-        env,
+        env: codexProcess.env,
         stdin: this.createDocumentRevisionPrompt(documentPath, instruction),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -308,7 +309,6 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
-    const env = createCodexProcessEnv();
     let command = this.options.command;
     let stdout = "";
     let stderr = "";
@@ -329,11 +329,12 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 生成新文档");
-      command = await resolveCodexCommand(this.options.command, env.PATH || "");
+      const codexProcess = await prepareCodexProcess(this.options.command, this.options.proxy);
+      command = codexProcess.command;
       const result = await runProcess({
         command,
         args,
-        env,
+        env: codexProcess.env,
         stdin: this.createDocumentCreationPrompt(instruction),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
@@ -386,7 +387,6 @@ export class CodexTextProvider {
       outputPath,
       "-"
     ];
-    const env = createCodexProcessEnv();
     let command = this.options.command;
     let stdout = "";
     let stderr = "";
@@ -409,11 +409,12 @@ export class CodexTextProvider {
 
     try {
       this.emitStream(streamOptions, "status", "正在调用 Codex 提取页面规划");
-      command = await resolveCodexCommand(this.options.command, env.PATH || "");
+      const codexProcess = await prepareCodexProcess(this.options.command, this.options.proxy);
+      command = codexProcess.command;
       const result = await runProcess({
         command,
         args,
-        env,
+        env: codexProcess.env,
         stdin: this.createPagePlanSyncPrompt(pagePlanPath),
         timeoutMs: this.options.timeoutMs,
         signal: streamOptions.signal,
